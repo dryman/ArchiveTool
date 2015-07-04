@@ -10,8 +10,9 @@ import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FilterFileSystem;
-import org.apache.hadoop.fs.FsStatus;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.MapWritable;
+import org.apache.hadoop.io.Text;
 
 import com.google.common.base.Preconditions;
 
@@ -19,6 +20,7 @@ public class Har2FileSystem extends FilterFileSystem {
   private URI uri;
   private Path archivePath;
   private String harAuth;
+  private MapWritable fileIndex;
   /**
    * Constructor for Har2 FileSystem
    *
@@ -54,10 +56,23 @@ public class Har2FileSystem extends FilterFileSystem {
     if (fs == null) {
       fs = FileSystem.get(conf); // FIXME use default FS first
     }
+    Path cur = new Path(".");
+    cur = fs.getFileStatus(cur).getPath();
+    //fs.makeQualified(cur);
+    LOG.debug("cur is qualified: " + cur);
+    
     
     uri = har2_path.toUri();
-    archivePath = new Path(".");
+    archivePath = new Path(name.getScheme(), name.getAuthority(), Path.getPathWithoutSchemeAndAuthority(cur).toString());
+    LOG.debug("archivePath is: " + archivePath);
     harAuth = getHarAuth(underlyingURI);
+    
+    // In real application, there would be multiple fileIndexes.
+    fileIndex = new MapWritable();
+    FSDataInputStream fis = fs.open(new Path(cur, "_index"));
+    fileIndex.readFields(fis);
+    fis.close();
+    
     
     super.initialize(name, conf);
     LOG.debug("Initialized");
@@ -126,16 +141,20 @@ public class Har2FileSystem extends FilterFileSystem {
     return this.uri;
   }
   
+  private static String getRelativePathString(Path parent, Path child) {
+    Path p = Path.getPathWithoutSchemeAndAuthority(parent);
+    Path c = Path.getPathWithoutSchemeAndAuthority(child);
+    return p.toUri().relativize(c.toUri()).getPath();
+  }
+  
   @Override
   public FileStatus getFileStatus(Path p) throws IOException {
-    LOG.debug("input path is: " + p);
-    String path_string = p.toUri().getPath();
-    LOG.debug("input path string is: " + path_string);
     
-    Path out = new Path(uri.getScheme(), uri.getAuthority(), path_string);
-    LOG.debug("output path is: " + out);
+    String relativePathString = getRelativePathString(archivePath, p);
+    Har2FileStatus status = (Har2FileStatus) fileIndex.get(new Text(relativePathString));
+    status.makeQualifiedHar2Status(archivePath);
     
-    return new FileStatus(37, false, 1, 128, 1435898382000L, out);
+    return status;
   }
   
   private URI decodeHar2URI(URI raw_uri, Configuration conf) throws IOException {
@@ -193,7 +212,13 @@ public class Har2FileSystem extends FilterFileSystem {
   @Override
   public FSDataInputStream open (Path f, int bufferSize) throws IOException {
     LOG.debug("Using my open");
-    int block_num = Integer.parseInt(f.getName());
+    
+    String relativePathString = getRelativePathString(archivePath, f);
+    Har2FileStatus status = (Har2FileStatus) fileIndex.get(new Text(relativePathString));
+    status.makeQualifiedHar2Status(archivePath);
+    
+    
+    int block_num = status.getXZBlockId();
     File in_file = new File("foo.xz");
     Preconditions.checkState(in_file.exists(), "Input file doesn't exist");
     return new FSDataInputStream(new Har2InputStream(block_num));

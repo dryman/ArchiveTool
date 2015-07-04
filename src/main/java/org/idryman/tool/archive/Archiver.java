@@ -3,7 +3,6 @@ package org.idryman.tool.archive;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.util.List;
 
 import org.apache.commons.io.IOUtils;
@@ -11,11 +10,16 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
+import org.apache.hadoop.fs.FSDataOutputStream;
+import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.MapWritable;
+import org.apache.hadoop.io.Text;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.log4j.BasicConfigurator;
+import org.idryman.tool.fs.Har2FileStatus;
 import org.tukaani.xz.FilterOptions;
 import org.tukaani.xz.LZMA2Options;
 import org.tukaani.xz.X86Options;
@@ -74,19 +78,32 @@ public final class Archiver extends Configured implements Tool{
     XZOutputStream outxz = new XZOutputStream(fs.create(out_file, true), options);
     
     //Har2FileStatus f_status = Har2FileStatus.newFileStatusWithBlockId(f, blockId)
-    OutputStream index = fs.create(new Path("_index"), true);
+    FSDataOutputStream indexOut = fs.create(new Path("_index"), true);
     
+    Path parent = fs.getFileStatus(new Path(".")).getPath();
+    
+    MapWritable indexMap = new MapWritable();
+    
+    int blockId = 0;
     for (Path f : in_files) {
       InputStream fis = fs.open(f);
-      LOG.debug("Path: " + f);
-      LOG.debug("File status: " + fs.getFileStatus(f));
+      FileStatus status = fs.getFileStatus(f);
+
+      // TODO check what would happen if input file is empty
+      // Maybe need to set the block number to -1 when it's empty
       LOG.info("Copied " + IOUtils.copy(fis, outxz) + " bytes from " + f);
       outxz.flush();
       outxz.endBlock();
+      
+      Har2FileStatus har2Status = new Har2FileStatus(status, blockId++);
+      har2Status.makeRelativeHar2Status(parent);
+      indexMap.put(new Text(har2Status.getPath().toString()), har2Status);
+      
       fis.close();
     }
+    indexMap.write(indexOut);
     outxz.close();
-    index.close();
+    indexOut.close();
   }
   
   public static void main(String[] args) throws Exception {
