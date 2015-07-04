@@ -14,6 +14,7 @@ public class SeekableHDFSInputStream extends SeekableInputStream{
   long length;
   
   public SeekableHDFSInputStream(FileSystem fs, Path path) throws IOException {
+    Preconditions.checkArgument(fs.exists(path));
     Preconditions.checkArgument(fs.isFile(path));
     stream = fs.open(path);
     length = fs.getFileStatus(path).getLen();

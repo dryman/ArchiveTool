@@ -22,7 +22,6 @@ public class Har2InputStream extends FSInputStream implements Seekable, Position
   private SeekableXZInputStream fis;
   private long                  start;
   private long                  end;
-  private long                  pos;
 
   public Har2InputStream(int block_num) throws FileNotFoundException, IOException {
     /*
@@ -36,35 +35,34 @@ public class Har2InputStream extends FSInputStream implements Seekable, Position
     LOG.info("Contains " + fis.getBlockCount() + " blocks");
     start = fis.getBlockPos(block_num);
     end   = start + fis.getBlockSize(block_num);
+    LOG.debug("start position at: " + start);
+    LOG.debug("end position at: " + end);
+    LOG.debug("cursor position at: " + fis.position());
     fis.seek(start);
   }
   
   @Override
   public int read() throws IOException {
-    int value = fis.read();
-    if (value >= 0) {
-      pos++;
+    if (fis.position() >= end) {
+      return -1;
     }
-    return value;
+    return fis.read();
   }
   
   @Override
   public int read(byte buf[], int off, int len) throws IOException {
-    int value = fis.read(buf, off, len);
-    if (value >= 0) {
-      pos+=value;
-      Preconditions.checkState(pos <= end, "Seek position should before end");
+    LOG.debug("Before read, cursor position at: " + fis.position());
+    if (fis.position() >= end) {
+      return -1;
     }
-    return value;
-  }
+    int length = len;
+    if (length > end - fis.position()) {
+      length = (int) (end - fis.position());
+    }
+    int value = fis.read(buf, off, length);
+    
+    LOG.debug("After read, cursor position at: " + fis.position());
 
-  @Override
-  public int read(byte buf[]) throws IOException {
-    int value = fis.read(buf);
-    if (value >= 0) {
-      pos+=value;
-      Preconditions.checkState(pos <= end, "Seek position should before end");
-    }
     return value;
   }
 
@@ -75,14 +73,13 @@ public class Har2InputStream extends FSInputStream implements Seekable, Position
     if (position + start > end) {
       throw new EOFException(FSExceptionMessages.CANNOT_SEEK_PAST_EOF);
     }
-    pos = position + start;
-    fis.seek(pos);
+    fis.seek(position + start);
   }
 
 
 
   public long getPos() throws IOException {
-    return pos-start;
+    return fis.position()-start;
   }
 
 
@@ -91,5 +88,9 @@ public class Har2InputStream extends FSInputStream implements Seekable, Position
     return false;
   }
 
+  public void close() throws IOException {
+    fis.close();
+    LOG.debug("XZInputStream closed");
+  }
   
 }
