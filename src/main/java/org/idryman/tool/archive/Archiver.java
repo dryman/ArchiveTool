@@ -79,10 +79,14 @@ public final class Archiver extends Configured implements Tool{
     
     //Har2FileStatus f_status = Har2FileStatus.newFileStatusWithBlockId(f, blockId)
     FSDataOutputStream indexOut = fs.create(new Path("_index"), true);
+    /*
+     * TODO although MapWritable is convenient, but maybe not that flexible to build a
+     * har:/index -> actual FileStatus map on reading time
+     */
     
     Path parent = fs.getFileStatus(new Path(".")).getPath();
     
-    MapWritable indexMap = new MapWritable();
+    //MapWritable indexMap = new MapWritable();
     
     int blockId = 0;
     for (Path f : in_files) {
@@ -91,17 +95,39 @@ public final class Archiver extends Configured implements Tool{
 
       // TODO check what would happen if input file is empty
       // Maybe need to set the block number to -1 when it's empty
-      LOG.info("Copied " + IOUtils.copy(fis, outxz) + " bytes from " + f);
-      outxz.flush();
-      outxz.endBlock();
+      /*
+       *  When the file is zero byte, need to do special case:
+       *  1. still need to store file status
+       *  2. Do not advance outxz
+       *  3. on har2filesystem, return 0 byte
+       *  4. blockId is -1
+       *  5. part name is ""
+       */
+      Har2FileStatus har2Status = new Har2FileStatus(status);
+
       
-      Har2FileStatus har2Status = new Har2FileStatus(status, blockId++);
+      if (har2Status.getLen() == 0) {
+        har2Status.setPartitionAndBlock("", -1);
+        LOG.info("File " + f + " has 0 length. Created a pseudo fileStatus");
+      } else {
+        
+        // TODO need to handle the case when the bytes to copy is too large
+        // need to either use copyLarge, or incremental copy?
+        LOG.info("Copied " + IOUtils.copy(fis, outxz) + " bytes from " + f);
+        outxz.flush();
+        outxz.endBlock();
+        har2Status.setPartitionAndBlock("part-0", blockId++);
+      }
       har2Status.makeRelativeHar2Status(parent);
-      indexMap.put(new Text(har2Status.getPath().toString()), har2Status);
+      har2Status.write(indexOut);
+
+      
+
+      //indexMap.put(new Text(har2Status.getPath().toString()), har2Status);
       
       fis.close();
     }
-    indexMap.write(indexOut);
+    //indexMap.write(indexOut);
     outxz.close();
     indexOut.close();
   }

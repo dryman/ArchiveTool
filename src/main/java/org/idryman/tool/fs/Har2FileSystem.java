@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Map;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
@@ -15,12 +16,14 @@ import org.apache.hadoop.io.MapWritable;
 import org.apache.hadoop.io.Text;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Maps;
 
 public class Har2FileSystem extends FilterFileSystem {
   private URI uri;
   private Path archivePath;
+  private Path underlyingArchivePath;
   private String harAuth;
-  private MapWritable fileIndex;
+  private Map<Path, Har2FileStatus> fileIndex;
   /**
    * Constructor for Har2 FileSystem
    *
@@ -58,6 +61,7 @@ public class Har2FileSystem extends FilterFileSystem {
     }
     Path cur = new Path(".");
     cur = fs.getFileStatus(cur).getPath();
+    underlyingArchivePath = cur;
     //fs.makeQualified(cur);
     LOG.debug("cur is qualified: " + cur);
     
@@ -68,9 +72,14 @@ public class Har2FileSystem extends FilterFileSystem {
     harAuth = getHarAuth(underlyingURI);
     
     // In real application, there would be multiple fileIndexes.
-    fileIndex = new MapWritable();
+    fileIndex = Maps.newHashMap();
     FSDataInputStream fis = fs.open(new Path(cur, "_index"));
-    fileIndex.readFields(fis);
+    while (fis.available() > 0) {
+      Har2FileStatus h2Status = new Har2FileStatus();
+      h2Status.readFields(fis);
+      h2Status.makeQualifiedHar2Status(archivePath);
+      fileIndex.put(h2Status.getPath(), h2Status);
+    }
     fis.close();
     
     
@@ -108,8 +117,10 @@ public class Har2FileSystem extends FilterFileSystem {
     }
 
     URI tmpURI = fsPath.toUri();
-    //change this to Har uri 
-    return new Path(uri.getScheme(), harAuth, tmpURI.getPath());
+    //change this to Har uri
+    //Path retPath = new Path(uri.getScheme(), harAuth, tmpURI.getPath());
+    LOG.debug("qualified path: "+ fsPath);
+    return fsPath;
   }
   
   private String getHarAuth(URI underLyingUri) {
@@ -141,22 +152,19 @@ public class Har2FileSystem extends FilterFileSystem {
     return this.uri;
   }
   
-  private static String getRelativePathString(Path parent, Path child) {
-    Path p = Path.getPathWithoutSchemeAndAuthority(parent);
-    Path c = Path.getPathWithoutSchemeAndAuthority(child);
-    return p.toUri().relativize(c.toUri()).getPath();
-  }
-  
   @Override
   public FileStatus getFileStatus(Path p) throws IOException {
     
-    String relativePathString = getRelativePathString(archivePath, p);
-    Har2FileStatus status = (Har2FileStatus) fileIndex.get(new Text(relativePathString));
-    status.makeQualifiedHar2Status(archivePath);
-    
-    return status;
+    return fileIndex.get(p);
   }
   
+  /**
+   * TODO, make it flexible, ".har2" shouldn't be a necessary component.
+   * @param raw_uri
+   * @param conf
+   * @return
+   * @throws IOException
+   */
   private URI decodeHar2URI(URI raw_uri, Configuration conf) throws IOException {
     String authority = raw_uri.getAuthority();
     if (authority == null) {
@@ -212,16 +220,15 @@ public class Har2FileSystem extends FilterFileSystem {
   @Override
   public FSDataInputStream open (Path f, int bufferSize) throws IOException {
     LOG.debug("Using my open");
-    
-    String relativePathString = getRelativePathString(archivePath, f);
-    Har2FileStatus status = (Har2FileStatus) fileIndex.get(new Text(relativePathString));
-    status.makeQualifiedHar2Status(archivePath);
+    LOG.debug("Path is "+ f);
+    Har2FileStatus status = fileIndex.get(f);
     
     
     int block_num = status.getXZBlockId();
-    File in_file = new File("foo.xz");
-    Preconditions.checkState(in_file.exists(), "Input file doesn't exist");
-    return new FSDataInputStream(new Har2InputStream(block_num));
+    if (block_num < 0) {
+      return new FSDataInputStream(new Har2InputStream.EmtpyInputStream());
+    }
+    return new FSDataInputStream(new Har2InputStream(new Path(underlyingArchivePath, status.getPartition()), block_num));
   }
   
   @Override

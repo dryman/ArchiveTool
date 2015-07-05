@@ -5,9 +5,11 @@ import java.net.URISyntaxException;
 import java.util.Map.Entry;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.MapWritable;
+import org.idryman.tool.fs.Har2FileStatus;
 
 public class Experiments {
 
@@ -15,12 +17,13 @@ public class Experiments {
     
     FileSystem fs = FileSystem.get(new Configuration());
     Path indexPath = new Path("_index");
-    MapWritable map = new MapWritable();
-    map.readFields(fs.open(indexPath));
+    Har2FileStatus har2Status = new Har2FileStatus();
+    //MapWritable map = new MapWritable();
+    FSDataInputStream fis = fs.open(indexPath);
     
-    for (Entry entry : map.entrySet()) {
-      System.out.println(entry.getKey());
-      System.out.println(entry.getValue());
+    while(fis.available() > 0) {
+      har2Status.readFields(fis);
+      System.out.println(har2Status);
     }
   }
 
