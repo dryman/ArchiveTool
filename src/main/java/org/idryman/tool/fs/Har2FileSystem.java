@@ -1,29 +1,42 @@
 package org.idryman.tool.fs;
 
-import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Map;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.BlockLocation;
 import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FSDataOutputStream;
+import org.apache.hadoop.fs.FileChecksum;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.FilterFileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.io.MapWritable;
-import org.apache.hadoop.io.Text;
+import org.apache.hadoop.fs.permission.FsPermission;
+import org.apache.hadoop.util.Progressable;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
 
-public class Har2FileSystem extends FilterFileSystem {
-  private URI uri;
-  private Path archivePath;
-  private Path underlyingArchivePath;
-  private String harAuth;
+/**
+ * 
+ * Valid uri:
+ * 1. har2:/archive-path/sub-directories
+ * 2. har2:/archive-path.har2/sub-directories
+ * 3. har2://ClusterX/archive-path/sub-directories
+ *    -Dfs.har2.alias.ClusterX.scheme=hdfs (default)
+ *    -Dfs.har2.alias.ClusterX.authority=user:password@namenode:port
+ * You can use glob on sub-directories, but can not use on archive-path.
+ * archive doesn't need .har2 postfix.
+ */
+public class Har2FileSystem extends FileSystem {
+  private FileSystem fs;
+  private Path archivePath;              // qualified archivePath (scheme is har2)
+  private Path underlyingArchivePath;    // qualified underlying archivePath
   private Map<Path, Har2FileStatus> fileIndex;
+  
   /**
    * Constructor for Har2 FileSystem
    *
@@ -31,15 +44,94 @@ public class Har2FileSystem extends FilterFileSystem {
   public Har2FileSystem() {
   }
   
-  /**
-   * Constructor to create a Har2 FileSystem from
-   * another FileSystem
-   *
+  /** 
+   * TODO Not documented well yet
+   * Called after a new FileSystem instance is constructed.
+   * @param name a uri whose authority section names the host, port, etc.
+   *   for this FileSystem
+   * @param conf the configuration
    */
-  public Har2FileSystem(FileSystem fs) {
-    super(fs);
+  @Override
+  public void initialize(URI uri, Configuration conf) throws IOException {
+    super.initialize(uri, conf);
+    /*
+     * TODO in future version, maybe we can make Har2FileSystem able to stay in FileSystem Cache.
+     */
+    Preconditions.checkArgument(conf.getBoolean("fs.har2.impl.disable.cache", false),
+        "fs.har2.impl.disable.cache need to set to true, else Har2FileSystem wouldn't work properly");
+    
+    // Setup underlying file system
+    String authority = uri.getAuthority();
+    if (authority!=null) {
+      String underlyingScheme    = conf.get(String.format("fs.har2.alias.%s.scheme", authority));
+      String underlyingAuthority = conf.get(String.format("fs.har2.alias.%s.authority", authority));
+      if (underlyingScheme!=null && underlyingAuthority==null) {
+        if (underlyingScheme.equals(FileSystem.getDefaultUri(conf).getScheme())) {
+          fs = FileSystem.get(conf);
+        }
+      } else {
+        URI nonDefaultURI;
+        try {
+          nonDefaultURI = new URI(underlyingScheme, underlyingAuthority, "", "", "");
+          fs = FileSystem.get(nonDefaultURI, conf);
+        } catch (URISyntaxException e) {
+          throw new IOException(e);
+        }
+        
+      }
+    } else {
+      fs = FileSystem.get(conf);
+    }
+    
+    /*
+     * The archive directory can be either a path ends with .har2,
+     * or a directory that contains an empty file _HAR2_
+     */
+    Path underlyingRoot = new Path(fs.getScheme(),fs.getUri().getAuthority(), "/");
+    underlyingArchivePath = new Path(underlyingRoot, uri.getPath());
+    while(!underlyingRoot.equals(underlyingArchivePath)) {
+      if (fs.exists(new Path(underlyingArchivePath, "_HAR2_")) ||
+          underlyingArchivePath.toString().endsWith(".har2")) {
+        break;
+      }
+      underlyingArchivePath = underlyingArchivePath.getParent();
+    }
+    if (underlyingRoot.equals(underlyingArchivePath) && 
+        !fs.exists(new Path(underlyingArchivePath, "_HAR2_"))) {
+      throw new IOException("Invalid Har2 URI: "+uri);
+    }
+    
+    archivePath = new Path("har2", authority, 
+        Path.getPathWithoutSchemeAndAuthority(underlyingArchivePath).toString());
+    
+    //uri = har2_path.toUri();
+    LOG.debug("underlyingArchivePath is " + underlyingArchivePath);
+    LOG.debug("archivePath is: " + archivePath);
+    
+    // In real application, there would be multiple fileIndexes.
+    fileIndex = Maps.newHashMap();
+    
+    // TODO read dir indexes
+    /*
+     * there should be a file that contains all dir -> files in dir binding
+     * however, the index files would also contain the dirs, but only store the file status 
+     */
+    // TODO correct user permissions in status
+    // TODO read multiple indexes
+    FSDataInputStream fis = fs.open(new Path(underlyingArchivePath, "_index"));
+    while (fis.available() > 0) {
+      Har2FileStatus h2Status = new Har2FileStatus();
+      h2Status.readFields(fis);
+      h2Status.makeQualifiedHar2Status(archivePath);
+      fileIndex.put(h2Status.getPath(), h2Status);
+    }
+    fis.close();
+    
+    
+    LOG.debug("Initialized");
+    //Thread.dumpStack();
   }
-
+  
   /**
    * Return the protocol scheme for the FileSystem.
    *
@@ -50,171 +142,91 @@ public class Har2FileSystem extends FilterFileSystem {
     return "har2";
   }
   
+  /**
+   * Returns the uri of this filesystem.
+   * The uri is of the form 
+   * 1. har2:/archive-path/
+   * 2. har2:/archive-path.har2/
+   * 3. har2://ClusterX/archive-path/
+   *    -Dfs.har2.alias.ClusterX.scheme=hdfs (default)
+   *    -Dfs.har2.alias.ClusterX.authority=user:password@namenode:port
+   * @return uri URI that identifies the path to archive.
+   */
   @Override
-  public void initialize(URI name, Configuration conf) throws IOException {
-    LOG.debug("Initializing");
-    URI underlyingURI = decodeHar2URI(name, conf);
-    Path har2_path = new Path(name.getScheme(), name.getAuthority(), name.getPath());
-    
-    if (fs == null) {
-      fs = FileSystem.get(conf); // FIXME use default FS first
-    }
-    Path cur = new Path(".");
-    cur = fs.getFileStatus(cur).getPath();
-    underlyingArchivePath = cur;
-    //fs.makeQualified(cur);
-    LOG.debug("cur is qualified: " + cur);
-    
-    
-    uri = har2_path.toUri();
-    archivePath = new Path(name.getScheme(), name.getAuthority(), Path.getPathWithoutSchemeAndAuthority(cur).toString());
-    LOG.debug("archivePath is: " + archivePath);
-    harAuth = getHarAuth(underlyingURI);
-    
-    // In real application, there would be multiple fileIndexes.
-    fileIndex = Maps.newHashMap();
-    FSDataInputStream fis = fs.open(new Path(cur, "_index"));
-    while (fis.available() > 0) {
-      Har2FileStatus h2Status = new Har2FileStatus();
-      h2Status.readFields(fis);
-      h2Status.makeQualifiedHar2Status(archivePath);
-      fileIndex.put(h2Status.getPath(), h2Status);
-    }
-    fis.close();
-    
-    
-    super.initialize(name, conf);
-    LOG.debug("Initialized");
-    //Thread.dumpStack();
+  public URI getUri() {
+    return archivePath.toUri();
   }
   
+  /** 
+   * Check that a Path belongs to this FileSystem.
+   * @param path to check
+   */
+  @Override
+  protected void checkPath(Path path) {
+    LOG.debug("using my checkpath");
+    // TODO check if scheme and authority matches ours
+    // TODO check if it contains our archive path
+    // throw IAE if above doesn't match
+    // do nothing for now
+  }
+  
+  @Override
+  public FileStatus[] listStatus(Path f) throws FileNotFoundException,
+      IOException {
+    // TODO not implemented yet 
+    return null;
+  }
+  
+  @Override
+  public BlockLocation[] getFileBlockLocations(FileStatus file, 
+      long start, long len) throws IOException {
+    return null;
+  }
+  
+  @Override
+  public BlockLocation[] getFileBlockLocations(Path p, 
+      long start, long len) throws IOException {
+    return null;
+  }
+  
+  
   /**
-   * return the top level archive.
+   * Return the top level archive path.
+   * @return archivePath top level archive path with scheme har2://
    */
   @Override
   public Path getWorkingDirectory() {
-    return new Path(uri.toString());
+    return archivePath;
   }
 
+  /**
+   * Return the top level archive path.
+   * @return archivePath top level archive path with scheme har2://
+   */
   @Override
   public Path getInitialWorkingDirectory() {
     return getWorkingDirectory();
   }
-
-  /* this makes a path qualified in the har filesystem
-   * (non-Javadoc)
-   * @see org.apache.hadoop.fs.FilterFileSystem#makeQualified(
-   * org.apache.hadoop.fs.Path)
-   */
-  @Override
-  public Path makeQualified(Path path) {
-    // make sure that we just get the 
-    // path component 
-    LOG.debug("my makeQualified");
-    Path fsPath = path;
-    if (!path.isAbsolute()) {
-      fsPath = new Path(archivePath, path);
-    }
-
-    URI tmpURI = fsPath.toUri();
-    //change this to Har uri
-    //Path retPath = new Path(uri.getScheme(), harAuth, tmpURI.getPath());
-    LOG.debug("qualified path: "+ fsPath);
-    return fsPath;
-  }
   
-  private String getHarAuth(URI underLyingUri) {
-    String auth = underLyingUri.getScheme() + "-";
-    if (underLyingUri.getHost() != null) {
-      if (underLyingUri.getUserInfo() != null) {
-        auth += underLyingUri.getUserInfo();
-        auth += "@";
-      }
-      auth += underLyingUri.getHost();
-      if (underLyingUri.getPort() != -1) {
-        auth += ":";
-        auth +=  underLyingUri.getPort();
-      }
-    }
-    else {
-      auth += ":";
-    }
-    return auth;
-  }
-  
-  /**
-   * Returns the uri of this filesystem.
-   * The uri is of the form 
-   * har://underlyingfsschema-host:port/pathintheunderlyingfs
-   */
-  @Override
-  public URI getUri() {
-    return this.uri;
-  }
   
   @Override
   public FileStatus getFileStatus(Path p) throws IOException {
-    
+    // TODO throws FileNotFoundException if not found
     return fileIndex.get(p);
   }
   
-  /**
-   * TODO, make it flexible, ".har2" shouldn't be a necessary component.
-   * @param raw_uri
-   * @param conf
-   * @return
-   * @throws IOException
-   */
-  private URI decodeHar2URI(URI raw_uri, Configuration conf) throws IOException {
-    String authority = raw_uri.getAuthority();
-    if (authority == null) {
-      return FileSystem.getDefaultUri(conf);
-    }
-    int i = authority.indexOf('-');
-    if (i < 0) {
-      throw new IOException("URI: " + raw_uri
-          + " is an invalid Har URI since '-' not found."
-          + "  Expecting har://<scheme>-<host>/<path>.");
-    }
-    
-    if (raw_uri.getQuery() != null) {
-      // query component not allowed
-      throw new IOException("query component in Path not supported  " + raw_uri);
-    }
-    
-    URI tmp;
-    try {
-      // convert <scheme>-<host> to <scheme>://<host>
-      URI baseUri = new URI(authority.replaceFirst("-", "://"));
- 
-      tmp = new URI(baseUri.getScheme(), baseUri.getAuthority(),
-          raw_uri.getPath(), raw_uri.getQuery(), raw_uri.getFragment());
-    } catch (URISyntaxException e) {
-      throw new IOException("URI: " + raw_uri
-          + " is an invalid Har URI. Expecting har://<scheme>-<host>/<path>.");
-    }
-    return tmp;
-  }
   
-  /*
-   * find the parent path that is the 
-   * archive path in the path. The last
-   * path segment that ends with .har is 
-   * the path that will be returned.
+  /**
+   * Get the checksum of a file, from the beginning of the file till the
+   * specific length.
+   * @param f The file path
+   * @param length The length of the file range for checksum calculation
+   * @return The file checksum.
    */
-  private Path archivePath(Path p) {
-    // TODO might not be the best way to use har
-    // 
-    Path retPath = null;
-    Path tmp = p;
-    for (int i=0; i< p.depth(); i++) {
-      if (tmp.toString().endsWith(".har2")) {
-        retPath = tmp;
-        break;
-      }
-      tmp = tmp.getParent();
-    }
-    return retPath;
+  public FileChecksum getFileChecksum(Path f, final long length)
+      throws IOException {
+    return null;
+    // TODO since xz gives us check sum automatically, we can use it?
   }
   
   @Override
@@ -232,15 +244,58 @@ public class Har2FileSystem extends FilterFileSystem {
   }
   
   @Override
-  protected void checkPath(Path path) {
-    LOG.debug("using my checkpath");
-    // do nothing for now
+  public void close() throws IOException {
+    fs.close();
+  }
+  
+  /*
+   ***********************************
+   *      Unsupported operations     *
+   ***********************************
+   */
+  
+  @Override
+  public FSDataOutputStream create(Path f, FsPermission permission,
+      boolean overwrite, int bufferSize, short replication, long blockSize,
+      Progressable progress) throws IOException {
+    throw new UnsupportedOperationException("Not implemented by the " + 
+      getClass().getSimpleName() + " FileSystem implementation");
   }
   
   
   @Override
-  public Path resolvePath(final Path p) throws IOException {
-    LOG.debug("using my resolvePath");
-    return p;
+  public boolean mkdirs(Path f, FsPermission permission) throws IOException {
+    throw new UnsupportedOperationException("Not implemented by the " + 
+        getClass().getSimpleName() + " FileSystem implementation");
   }
+  
+
+  @Override
+  public FSDataOutputStream append(Path f, int bufferSize, Progressable progress)
+      throws IOException {
+    throw new UnsupportedOperationException("Not implemented by the " + 
+        getClass().getSimpleName() + " FileSystem implementation");
+  }
+
+
+  @Override
+  public boolean rename(Path src, Path dst) throws IOException {
+    throw new UnsupportedOperationException("Not implemented by the " + 
+        getClass().getSimpleName() + " FileSystem implementation");
+  }
+
+
+  @Override
+  public boolean delete(Path f, boolean recursive) throws IOException {
+    throw new UnsupportedOperationException("Not implemented by the " + 
+        getClass().getSimpleName() + " FileSystem implementation");
+  }
+
+  @Override
+  public void setWorkingDirectory(Path new_dir) {
+    throw new UnsupportedOperationException("Not implemented by the " + 
+        getClass().getSimpleName() + " FileSystem implementation");
+  }
+
+
 }
