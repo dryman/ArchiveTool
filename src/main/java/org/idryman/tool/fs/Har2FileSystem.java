@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Map;
+import java.util.Map.Entry;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.BlockLocation;
@@ -15,6 +16,9 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.permission.FsPermission;
+import org.apache.hadoop.io.MapWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.util.Progressable;
 
 import com.google.common.base.Preconditions;
@@ -36,6 +40,7 @@ public class Har2FileSystem extends FileSystem {
   private Path archivePath;              // qualified archivePath (scheme is har2)
   private Path underlyingArchivePath;    // qualified underlying archivePath
   private Map<Path, Har2FileStatus> fileIndex;
+  private MapWritable dirIndex;
   
   /**
    * Constructor for Har2 FileSystem
@@ -110,6 +115,7 @@ public class Har2FileSystem extends FileSystem {
     
     // In real application, there would be multiple fileIndexes.
     fileIndex = Maps.newHashMap();
+
     
     // TODO read dir indexes
     /*
@@ -117,18 +123,29 @@ public class Har2FileSystem extends FileSystem {
      * however, the index files would also contain the dirs, but only store the file status 
      */
     // TODO correct user permissions in status
-    // TODO read multiple indexes
-    FSDataInputStream fis = fs.open(new Path(underlyingArchivePath, "_index"));
-    while (fis.available() > 0) {
-      Har2FileStatus h2Status = new Har2FileStatus();
-      h2Status.readFields(fis);
-      h2Status.makeQualifiedHar2Status(archivePath);
-      fileIndex.put(h2Status.getPath(), h2Status);
+    
+    for (FileStatus stat : fs.globStatus(new Path(underlyingArchivePath,"index-*"))) {
+      FSDataInputStream fis = fs.open(stat.getPath());
+      while (fis.available() > 0) {
+        Har2FileStatus h2Status = new Har2FileStatus();
+        h2Status.readFields(fis);
+        h2Status.makeQualifiedHar2Status(archivePath);
+        fileIndex.put(h2Status.getPath(), h2Status);
+        LOG.debug("Path loaded: " + h2Status.getPath());
+      }
+      fis.close();
     }
+    
+    dirIndex = new MapWritable();
+    FSDataInputStream fis = fs.open(new Path(underlyingArchivePath, "directoryMap"));
+    dirIndex.readFields(fis);
     fis.close();
     
     
-    LOG.debug("Initialized");
+    for (Entry<Writable, Writable> entry : dirIndex.entrySet()) {
+      LOG.debug("dirMap key: " + entry.getKey().toString());
+    }
+
     //Thread.dumpStack();
   }
   
@@ -171,10 +188,12 @@ public class Har2FileSystem extends FileSystem {
   }
   
   @Override
-  public FileStatus[] listStatus(Path f) throws FileNotFoundException,
+  public FileStatus[] listStatus(Path path) throws FileNotFoundException,
       IOException {
-    // TODO not implemented yet 
-    return null;
+    LOG.debug("using my listStatus");
+    Text key = new Text(Har2FileStatus.relativizePath(archivePath, path).toString());
+    LOG.debug("querying key is: " + key);
+    return ((Har2ArrayWritable) dirIndex.get(key)).toHar2FileStatusArray();
   }
   
   @Override
@@ -231,8 +250,6 @@ public class Har2FileSystem extends FileSystem {
   
   @Override
   public FSDataInputStream open (Path f, int bufferSize) throws IOException {
-    LOG.debug("Using my open");
-    LOG.debug("Path is "+ f);
     Har2FileStatus status = fileIndex.get(f);
     
     

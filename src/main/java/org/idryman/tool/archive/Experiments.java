@@ -7,9 +7,10 @@ import java.net.URISyntaxException;
 import org.apache.hadoop.fs.Path;
 
 public class Experiments {
+  
 
   public static void main(String[] args) throws URISyntaxException, IOException {
-    
+
 //    FileSystem fs = FileSystem.get(new Configuration());
 //    Path indexPath = new Path("_index");
 //    Har2FileStatus har2Status = new Har2FileStatus();
@@ -30,7 +31,18 @@ public class Experiments {
     System.out.println(p);
     
     uri = new URI("file:/abc");
-    System.out.println(uri.relativize(new URI("file:/abc")));
+    URI relativeURI = uri.relativize(new URI("file:/abc"));
+    System.out.println(relativeURI.getScheme());
+    System.out.println(relativeURI.getAuthority());
+    System.out.println(relativeURI.getUserInfo());
+    System.out.println(relativeURI.getHost());
+    System.out.println(relativeURI.getPort());
+    System.out.println(relativeURI.getPath());
+    System.out.println("---");
+    
+    uri = new URI("http://def.com/abc");
+    URI relativeURI2 = uri.relativize(new URI("http://def.com/abc"));
+    System.out.println(relativeURI.equals(relativeURI2));
   }
 
 }

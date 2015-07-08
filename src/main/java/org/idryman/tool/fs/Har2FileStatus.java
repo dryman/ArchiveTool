@@ -24,9 +24,16 @@ public class Har2FileStatus extends FileStatus {
     xzPartition = new Text();
   }
   
-  public Har2FileStatus (FileStatus f) throws IOException {
+  public Har2FileStatus (FileStatus f, Path parent) throws IOException {
     super(f);
     xzPartition = new Text();
+    setPath(relativizePath(parent, getPath()));
+  }
+  
+  public static Path relativizePath(Path parent, Path child) {
+    Path p = Path.getPathWithoutSchemeAndAuthority(parent);
+    Path c = Path.getPathWithoutSchemeAndAuthority(child);
+    return new Path(p.toUri().relativize(c.toUri()));
   }
   
   @Override
@@ -63,16 +70,6 @@ public class Har2FileStatus extends FileStatus {
   public void setPartitionAndBlock(String partition, int blockId) {
     this.xzPartition.set(partition);
     this.xzBlockId = blockId;
-  }
-  
-  /**
-   * Remove the parent part of the original file status before write to disk
-   * @param parent
-   */
-  public void makeRelativeHar2Status(Path parent) {
-    Path p = Path.getPathWithoutSchemeAndAuthority(parent);
-    Path c = Path.getPathWithoutSchemeAndAuthority(getPath());
-    setPath(new Path(p.toUri().relativize(c.toUri())));
   }
 
   /**
