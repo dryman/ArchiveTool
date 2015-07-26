@@ -2,7 +2,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.idryman.tool</groupId>
   <artifactId>ArchiveTool</artifactId>
-  <version>0.0.1-SNAPSHOT</version>
+  <version>0.2.0-SNAPSHOT</version>
   <name>ArchiveTool</name>
   <description>A hadoop archiving tool that can reduce file counts and compress inputs using XZ compression</description>
   <properties>
@@ -11,6 +11,7 @@
   </properties>
   <scm>
     <connection>scm:git:git@github.com:dryman/ArchiveTool</connection>
+    <tag>HEAD</tag>
   </scm>
   <build>
     <plugins>
