@@ -15,8 +15,6 @@ import org.apache.hadoop.fs.PositionedReadable;
 import org.apache.hadoop.fs.Seekable;
 import org.tukaani.xz.SeekableXZInputStream;
 
-import com.google.common.base.Preconditions;
-
 public class Har2InputStream extends FSInputStream implements Seekable, PositionedReadable{
   private static final Log LOG = LogFactory.getLog(Har2InputStream.class);
   private SeekableXZInputStream fis;

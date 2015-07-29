@@ -70,15 +70,15 @@ public final class ArchiveInputFormat extends CombineFileInputFormat<FileStatus,
     }
   }
   
-  private void addStatusesRecursively (FileStatus f, FileSystem fs, List<FileStatus> accumlator) throws FileNotFoundException, IOException{
-    for (FileStatus stat : fs.listStatus(f.getPath())) {
-      if (stat.isSymlink()) {
-        LOG.warn("skiping symlink: " + stat.getPath());
-        continue;
-      }
+  private void addStatusesRecursively (FileStatus stat, FileSystem fs, List<FileStatus> accumlator) throws FileNotFoundException, IOException{
+    if (stat.isSymlink()) {
+      LOG.warn("skiping symlink: " + stat.getPath());
+    } else {
       accumlator.add(stat);
       if (stat.isDirectory()) {
-        addStatusesRecursively(stat, fs, accumlator);
+        for (FileStatus s : fs.listStatus(stat.getPath())) {
+          addStatusesRecursively(s, fs, accumlator);
+        }
       }
     }
   }
