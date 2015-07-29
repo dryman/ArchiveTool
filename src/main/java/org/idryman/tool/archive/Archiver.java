@@ -82,24 +82,27 @@ public final class Archiver extends Configured implements Tool{
       FSDataOutputStream dirMapOut = fs.create(new Path(outPath, "directoryMap"));
       
       fs.setWorkingDirectory(parentPath);
-      // FIXME top level list is not done yet
+      Har2FileStatus har2Status;
       ArrayList<Har2FileStatus> har2Arr = Lists.newArrayList(); 
       for (String arg : args) {
         Path path = fs.makeQualified(new Path(arg));
         for (FileStatus status : fs.globStatus(path)) {
-          Har2FileStatus har2Status = new Har2FileStatus(status, parentPath);
+          har2Status = new Har2FileStatus(status, parentPath);
           har2Arr.add(har2Status);
-          har2Status.write(dirIndexOut);
         }
       }
+      har2Status = new Har2FileStatus(fs.getFileStatus(parentPath),parentPath);
+       // Path would write empty string if it were "." Need to use this work around to fake the current directory
+      har2Status.setPath(new Path("..")); 
+      har2Status.write(dirIndexOut);
       
       dirMap.put(new Text(""), new Har2ArrayWritable(har2Arr.toArray(new Har2FileStatus[0])));
       
       for (FileStatus status : archiveInput.listDirectoryStatus(job)) {
-        Har2FileStatus har2Status = new Har2FileStatus(status, parentPath);
+        //LOG.debug("adding path: " + status.getPath());
+        har2Status = new Har2FileStatus(status, parentPath);
         har2Status.write(dirIndexOut);
         Text key = new Text(har2Status.getPath().toString());
-        //ArrayWritable value = new ArrayWritable(Har2FileStatus.class);
         ArrayList<Har2FileStatus> tmpValues = Lists.newArrayList(); 
         for (FileStatus s : fs.listStatus(status.getPath())) {
           tmpValues.add(new Har2FileStatus(s, parentPath));
@@ -124,10 +127,6 @@ public final class Archiver extends Configured implements Tool{
     }
     return 1;
   }
-  
-
-  
-
   
   public final static class ArchiveMapper extends Mapper<FileStatus, Har2FileStatus, NullWritable, NullWritable> {
     private final static Log    LOG                 = LogFactory.getLog(ArchiveMapper.class);

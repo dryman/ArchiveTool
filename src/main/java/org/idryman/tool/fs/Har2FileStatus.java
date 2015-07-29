@@ -17,6 +17,7 @@ public class Har2FileStatus extends FileStatus {
   private Text xzPartition;
   private int xzBlockId; // if we want to make a file splitable in future, this wouldn't work
   private transient boolean initialized;
+  private static final Path rootPath = new Path("..");
   
   // For ReflectionUtil use
   public Har2FileStatus () {
@@ -38,6 +39,7 @@ public class Har2FileStatus extends FileStatus {
   
   @Override
   public void write(DataOutput out) throws IOException {
+    
     Preconditions.checkState(!getPath().isAbsolute(), getPath()
         + " should convert to relative before write to disk. "
         + "Did you forget to call makeRelativeHar2Status(Path parent)?");
@@ -80,7 +82,11 @@ public class Har2FileStatus extends FileStatus {
   public void makeQualifiedHar2Status(Path archivePath) {
     if (initialized) return;
     Preconditions.checkArgument("har2".equals(archivePath.toUri().getScheme()), "archivePath should have scheme as har2");
-    setPath(new Path(archivePath, getPath()));
+    if (getPath().equals(rootPath)) {
+      setPath(archivePath);
+    } else {
+      setPath(new Path(archivePath, getPath()));
+    }
     initialized = true;
   }
   
