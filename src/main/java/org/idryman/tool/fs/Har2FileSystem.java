@@ -254,12 +254,13 @@ public class Har2FileSystem extends FileSystem {
     LOG.debug("Opening path: " + f);
     Har2FileStatus status = fileIndex.get(f);
 
-    int block_num = status.getXZBlockId();
+    int block_num = status.getXZBlockOffset();
     if (block_num < 0) {
       return new FSDataInputStream(new Har2InputStream.EmtpyInputStream());
     }
-    LOG.debug("Partition is: " + status.getPartition());
-    return new FSDataInputStream(new Har2InputStream(new Path(underlyingArchivePath, status.getPartition()), block_num));
+    //LOG.debug("Partition is: " + status.getPartition());
+    //return new FSDataInputStream(new Har2InputStream(new Path(underlyingArchivePath, status.getPartition()), block_num));
+    return null;
   }
   
   @Override

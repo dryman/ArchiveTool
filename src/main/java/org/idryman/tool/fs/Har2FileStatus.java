@@ -14,20 +14,26 @@ import com.google.common.base.Preconditions;
 // The problem with writable object is it is hard to do versioning..
 // maybe I should use Arvo?
 public class Har2FileStatus extends FileStatus {
-  private Text xzPartition;
-  private int xzBlockId; // if we want to make a file splitable in future, this wouldn't work
+  private static final short VERSION = 1;
+  private short   version;
+  private Text    jobUUID;
+  private Text    partition;
+  private long    offset;
   private transient boolean initialized;
   private static final Path rootPath = new Path("..");
   
   // For ReflectionUtil use
   public Har2FileStatus () {
     super();
-    xzPartition = new Text();
+    version = VERSION;
+    jobUUID = new Text();
+    partition = new Text();
   }
   
-  public Har2FileStatus (FileStatus f, Path parent) throws IOException {
+  public Har2FileStatus (FileStatus f, String jobUUID, Path parent) throws IOException {
     super(f);
-    xzPartition = new Text();
+    this.partition = new Text();
+    this.jobUUID   = new Text(jobUUID);
     setPath(relativizePath(parent, getPath()));
   }
   
@@ -39,39 +45,53 @@ public class Har2FileStatus extends FileStatus {
   
   @Override
   public void write(DataOutput out) throws IOException {
-    
     Preconditions.checkState(!getPath().isAbsolute(), getPath()
         + " should convert to relative before write to disk. "
         + "Did you forget to call makeRelativeHar2Status(Path parent)?");
     super.write(out);
-    xzPartition.write(out);
-    out.writeInt(xzBlockId);
+    out.writeShort(VERSION);
+    jobUUID.write(out);
+    partition.write(out);
+    out.writeLong(offset);
   }
 
   @Override
   public void readFields(DataInput in) throws IOException {
     super.readFields(in);
-    xzPartition.readFields(in);
-    xzBlockId = in.readInt();
+    version = in.readShort();
+    // No version logic for now
+    jobUUID.readFields(in);
+    partition.readFields(in);
+    offset = in.readLong();
     initialized = false;
   }
   
-  public String getPartition() {
-    return xzPartition.toString();
+  public int getVersion() {
+    return version;
   }
   
-  public int getXZBlockId() {
-    return xzBlockId;
+  public Path getRelativePartitionPath() {
+    return new Path(jobUUID.toString(), partition.toString());
+  }
+  
+  public int getXZBlockOffset() {
+    return (int)offset;
+  }
+  
+  public long getOffset() {
+    return offset;
   }
   
   /**
    * TODO document normal case and empty file case
-   * @param partition xz compressed partition file name
-   * @param blockId the xz block number that this file points to
+   * @param partition Partition file name
+   * @param offset Offset of the archived file in the partition. 
+   *   If compressed by xz, it's the random access block offset in
+   *   xz compressed partition.
    */
-  public void setPartitionAndBlock(String partition, int blockId) {
-    this.xzPartition.set(partition);
-    this.xzBlockId = blockId;
+  public void setPartitionAndOffset(String partition, long offset) {
+    this.partition.set(partition);
+    this.offset = offset;
   }
 
   /**

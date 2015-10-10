@@ -4,7 +4,9 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.mapreduce.Job;
 
 public class Experiments {
   
@@ -12,6 +14,9 @@ public class Experiments {
   public static void main(String[] args) throws URISyntaxException, IOException {
     Path path = new Path("abc/def", new Path(".."));
     System.out.println(path.toString());
+    
+    Job job = Job.getInstance(new Configuration());
+    System.out.println(job.getReservationId());
 //    FileSystem fs = FileSystem.get(new Configuration());
 //    Path indexPath = new Path("_index");
 //    Har2FileStatus har2Status = new Har2FileStatus();

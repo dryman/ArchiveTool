@@ -1,92 +1,82 @@
 package org.idryman.tool.archive;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configurable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.PathFilter;
 import org.apache.hadoop.mapreduce.InputSplit;
 import org.apache.hadoop.mapreduce.JobContext;
 import org.apache.hadoop.mapreduce.RecordReader;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
 import org.apache.hadoop.mapreduce.lib.input.CombineFileInputFormat;
 import org.apache.hadoop.mapreduce.lib.input.CombineFileSplit;
+import org.apache.hadoop.util.ReflectionUtils;
 import org.idryman.tool.fs.Har2FileStatus;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 
-public final class ArchiveInputFormat extends CombineFileInputFormat<FileStatus, Har2FileStatus> {
+public class ArchiveInputFormat extends CombineFileInputFormat<FileStatus, Har2FileStatus> {
   private final static Log LOG = LogFactory.getLog(ArchiveInputFormat.class);
-  private List<FileStatus> allStatuses;
   
-  /*
-   * Currently no file get split by codec, but we can imporve that later on.
-   */
   @Override
-  protected boolean isSplitable(JobContext context, Path file) {
+  protected final boolean isSplitable(JobContext context, Path file) {
     return false;
   }
   
   @Override
-  public List<FileStatus> listStatus(JobContext job) throws IOException {
-    return listFileStatus(job);
-  }
-  
-  public List<FileStatus> listFileStatus(JobContext job) throws IOException {
-    if (allStatuses==null) { buildAllStatuses(job); }
-    List<FileStatus> ret = Lists.newArrayList();
-    for (FileStatus status : allStatuses) {
-      if (status.isFile()) {
-        ret.add(status);
-      }
-    }
-    return ret;
-  }
-  
-  public List<FileStatus> listDirectoryStatus(JobContext job) throws IOException {
-    if (allStatuses==null) { buildAllStatuses(job); }
-    List<FileStatus> ret = Lists.newArrayList();
-    for (FileStatus status : allStatuses) {
-      if (status.isDirectory()) {
-        ret.add(status);
-      }
-    }
-    return ret;
-  }
-  
-  private void buildAllStatuses(JobContext job) throws IOException {
-    FileSystem fs = FileSystem.get(job.getConfiguration());
-    allStatuses = Lists.newArrayList();
-    for (Path inPath : getInputPaths(job)) {
-      for (FileStatus status : fs.globStatus(inPath)) {
-        addStatusesRecursively(status, fs, allStatuses);
-      }
-    }
-  }
-  
-  private void addStatusesRecursively (FileStatus stat, FileSystem fs, List<FileStatus> accumlator) throws FileNotFoundException, IOException{
-    if (stat.isSymlink()) {
-      LOG.warn("skiping symlink: " + stat.getPath());
-    } else {
-      accumlator.add(stat);
-      if (stat.isDirectory()) {
-        for (FileStatus s : fs.listStatus(stat.getPath())) {
-          addStatusesRecursively(s, fs, accumlator);
-        }
-      }
-    }
+  public final RecordReader<FileStatus, Har2FileStatus> createRecordReader(
+      InputSplit split, TaskAttemptContext context) throws IOException {
+    return new ArchiverRecordReader(split, context);
   }
   
   @Override
-  public RecordReader<FileStatus, Har2FileStatus> createRecordReader(
-      InputSplit split, TaskAttemptContext context) throws IOException {
-    return new ArchiverRecordReader(split, context);
+  public final List<FileStatus> listStatus(JobContext job) throws IOException {
+    List<FileStatus> result = new ArrayList<FileStatus>();
+    FileSystem fs = FileSystem.get(job.getConfiguration());
+    NonSymlinkFilter filter = ReflectionUtils.newInstance(NonSymlinkFilter.class, job.getConfiguration());
+    
+    for (Path p : getInputPaths(job)) {
+      FileStatus[] matches = fs.globStatus(p);
+      Preconditions.checkNotNull(matches, "File not found: " + p);
+      for (FileStatus status : matches){
+        if (filter.accept(status.getPath())) {
+          addInputPathRecursively(result, fs, status.getPath(), filter);
+        }
+      }
+    }
+    
+    return result;
+  }
+  
+  public static class NonSymlinkFilter implements PathFilter, Configurable {
+    protected Configuration conf;
+    public NonSymlinkFilter(){};
+    public boolean accept(Path path) {
+      try {
+        FileSystem fs = FileSystem.get(conf);
+        return !fs.getFileStatus(path).isSymlink();
+      }  catch (IOException e) {
+        e.printStackTrace();
+      }
+      return false;
+    } 
+
+    public void setConf(Configuration conf) {
+      this.conf = conf;
+    }
+
+    public Configuration getConf() {
+      return conf;
+    }
   }
   
   
@@ -108,14 +98,15 @@ public final class ArchiveInputFormat extends CombineFileInputFormat<FileStatus,
       FileSystem fs = FileSystem.get(conf);
       CombineFileSplit comSplit = (CombineFileSplit) split;
       
-      Path parent = fs.makeQualified(new Path(conf.get(Archiver.HAR2_PARENT_KEY)));
+      Path parent = fs.makeQualified(new Path(conf.get(Har2Archiver.HAR2_PARENT_KEY)));
+      String jobUUID = conf.get(Har2Archiver.HAR2_JOB_UUID_KEY);
       
       bytesRead = totalBytes = 0;
       fileStatuses = Lists.newArrayList();
       har2Statuses = Lists.newArrayList();
       for (Path path : comSplit.getPaths()) {
         FileStatus     status     = fs.getFileStatus(path);
-        Har2FileStatus har2Status = new Har2FileStatus(status, parent);
+        Har2FileStatus har2Status = new Har2FileStatus(status, jobUUID, parent);
         fileStatuses.add(status);
         har2Statuses.add(har2Status);
         totalBytes += status.getLen();
