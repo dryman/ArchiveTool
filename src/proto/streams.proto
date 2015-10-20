@@ -1,0 +1,60 @@
+option java_package = "org.idryman.compression.protocol";
+option java_outer_classname = "StreamProtos";
+
+message Stream {
+  enum Kind {
+    BLOB = 0;
+    INTEGER = 1;
+    COMPOSITE = 2;
+  }
+  required Kind kind = 1;
+  required int64 length = 2;
+  optional int64 offset = 3;
+
+  oneof scheme {
+    IntegerStreamMeta integerMeta = 4;
+    DictionaryStreamMeta dictionaryMeta = 5;
+  }
+}
+
+
+message IntegerStreamMeta {
+  enum Kind {
+    UINT_8 = 0;
+    UINT_16 = 1;
+    UINT_32 = 2;
+    UINT_64 = 3;
+    INT_8 = 4;
+    INT_16 = 5;
+    INT_32 = 6;
+    INT_64 = 7;
+  }
+  enum Encoding {
+    STRAIGHT = 0;
+    VARINT = 1;
+    VARINT_SORTED = 2;
+    // Patched Grouped Int in 384 bits
+    PG384 = 3;
+    PG384_SORTED = 4;
+  }
+  required Kind kind = 1;
+  required Encoding encoding = 2;
+}
+
+message DictionaryStreamMeta {
+  enum Kind {
+    SimpleDictionary = 0;
+    SortedDictionary = 1;
+    CompressedDictionaryBlockes = 2;
+    SortedCompressedDictionaryBlockes = 3;
+  }
+  enum Compression {
+    DEFLATE = 0;
+    BZIP = 1;
+    SNAPPY = 2;
+  }
+  required Kind kind = 1;
+  optional Compression compression = 2;
+  repeated Stream streams = 3;
+}
+
