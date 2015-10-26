@@ -33,9 +33,9 @@ message IntegerStreamMeta {
     STRAIGHT = 0;
     VARINT = 1;
     VARINT_SORTED = 2;
-    // Patched Grouped Int in 384 bits
-    PG384 = 3;
-    PG384_SORTED = 4;
+    // Patched Frame of Reference in 384 bits
+    PFOR384 = 3;
+    PFOR384_SORTED = 4;
   }
   required Kind kind = 1;
   required Encoding encoding = 2;
