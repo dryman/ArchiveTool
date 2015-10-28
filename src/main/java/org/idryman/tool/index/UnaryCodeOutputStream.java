@@ -23,6 +23,10 @@ public class UnaryCodeOutputStream extends FilterOutputStream{
     int ps=0, idx=0;
     byte buf [] = new byte [getBytesForInts(numbers)];    
     for (int n: numbers) {
+      if (ps==8){
+        idx++;
+        ps=0;
+      }
       n+=ps;
       ps=0;
       while(n >= 8) {
@@ -32,12 +36,9 @@ public class UnaryCodeOutputStream extends FilterOutputStream{
       //System.out.println(n);
       buf[idx] |= (byte)(1 << n);
       ps = n+1;
-      if (ps==8){
-        idx++;
-        ps=0;
-      }
     }
     super.write(buf);
+    Preconditions.checkState(idx==buf.length-1);
   }
   public int getBytesForInts(int [] numbers) {
     int sum = 0, ret;
