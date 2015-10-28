@@ -21,7 +21,7 @@ public class DiffVarIntInputStream extends BufferedInputStream{
       do {
         tmp = super.read();
         if (tmp==-1) {
-          return iter == offset ? -1 : iter - offset; 
+          return iter == offset ? -1 : iter - offset;
         }
         diff_val = (diff_val << 7) | (tmp & 0x7F); 
       } while((tmp & 0x80) != 0);
