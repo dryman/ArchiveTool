@@ -3,9 +3,10 @@ package org.idryman.tool.index;
 import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.util.Arrays;
 
 import org.apache.log4j.Logger;
+
+import com.google.common.base.Preconditions;
 
 public class Pfor384OutputStream extends FilterOutputStream{
   private final static Logger LOG = Logger.getLogger(Pfor384OutputStream.class);
@@ -13,7 +14,9 @@ public class Pfor384OutputStream extends FilterOutputStream{
   private final static int [] mask_shift_64 = {70,63,56,49,42,35,28,21,14,7};
   private byte varint_buf_64[] = new byte[11];
   private final long [] buffer = new long[8192];
+  private final byte [] byteBuf = new byte[48];
   private int posIn = 0, posOut=0;
+  private int penalty, patchOffset, varints;
   
   /*
    * I may want to add some other scheme, like 14, 18, and 20
@@ -47,10 +50,8 @@ public class Pfor384OutputStream extends FilterOutputStream{
     final int [] paramRef = new int [3]; // penalty, patch_offset, varints 
     
     final int decision = makeDecision(paramRef);
-    
-    writeWithScheme(buffer, posOut, decision, paramRef[0], paramRef[1], paramRef[2]);
+    writeWithScheme(buffer, decision);
     LOG.assertLog(decision != -1, "decision should not be -1");
-    posOut += 384/schemes[decision];
   }
   
   @Override
@@ -65,8 +66,7 @@ public class Pfor384OutputStream extends FilterOutputStream{
     while(true) {
       final int decision = makeDecision(paramRef);
       if (decision != -1) {
-        writeWithScheme(buffer, posOut, decision, paramRef[0], paramRef[1], paramRef[2]);
-        posOut += 384/schemes[decision];
+        writeWithScheme(buffer, decision);
       } else {
         
         break;
@@ -143,8 +143,8 @@ public class Pfor384OutputStream extends FilterOutputStream{
       }
     } // end scheme4
     
-    // Rest of the schemes
-    for (int i = 1; i<9; i++) {
+    // Rest of the schemes except 64
+    for (int i = 1; i<8; i++) {
       final int scheme = schemes[i];
       final int end = 384/scheme+pos;
       // FIXME the limit of scheme64 should use unsigned
@@ -202,22 +202,25 @@ public class Pfor384OutputStream extends FilterOutputStream{
       
       if (rate < lowest_rate) {
         LOG.debug("using varint");
-        paramRef[0] = varint_penalty;
-        paramRef[1] = 0; // no patch_offset
-        paramRef[2] = limit-pos;
+        this.penalty = varint_penalty;
+        this.varints = limit-pos;
+        // No need to set offset. This is not group int.
         return -1;
       }
     }
     
     LOG.info("using scheme: "+schemes[decision] + " with rate: " + (int)lowest_rate + " penalty "+ penalties[decision] + 
         " patch_offset " + patch_offset[decision] + " and varints " + varints[decision]);
-    paramRef[0] = penalties[decision];
-    paramRef[1] = patch_offset[decision];
-    paramRef[2] = varints[decision];
+    this.penalty     = penalties[decision];
+    this.patchOffset = patch_offset[decision];
+    this.varints     = varints[decision];
     return decision;
   }
   
-  private void writeWithScheme(long input[], int pos, int decision, int penalty, int patch_offset, int varints) throws IOException {
+  private void writeWithScheme(long input[], int decision) throws IOException {
+    final int penalty = this.penalty;
+    final int patch_offset = this.patchOffset;
+    
     byte [] header = new byte[2];
     
     header[0] = (byte) decision;
@@ -239,228 +242,221 @@ public class Pfor384OutputStream extends FilterOutputStream{
     
     super.write(header);
     
-    switch(decision) {
-    case 0:
-      writeScheme4( Arrays.copyOfRange(input, pos, pos+96), patch_offset, varints); break;
-    case 1:
-      writeScheme6( Arrays.copyOfRange(input, pos, pos+64), patch_offset, varints); break;
-    case 2:
-      writeScheme8( Arrays.copyOfRange(input, pos, pos+48), patch_offset, varints); break;
-    case 3:
-      writeScheme12(Arrays.copyOfRange(input, pos, pos+32), patch_offset, varints); break;
-    case 4:
-      writeScheme16(Arrays.copyOfRange(input, pos, pos+24), patch_offset, varints); break;
-    case 5:
-      writeScheme24(Arrays.copyOfRange(input, pos, pos+16), patch_offset, varints); break;
-    case 6:
-      writeScheme32(Arrays.copyOfRange(input, pos, pos+12), patch_offset, varints); break;
-    case 7:
-      writeScheme48(Arrays.copyOfRange(input, pos, pos+ 8), patch_offset, varints); break;
-    default:
-      writeScheme64(Arrays.copyOfRange(input, pos, pos+ 6), patch_offset, varints);
+    // patch input
+    final long [] varint_buf = new long [varints];
+    if (varints>0) {
+      final int scheme = schemes[decision];
+      final long ceilling = (1L << scheme) -1;
+      final int limit = posOut + (384/scheme);
+      final int offset = posOut+patchOffset;
+      int v=0;
+      
+      // first patch
+      varint_buf[v++] = buffer[offset];
+      LOG.debug("found " + buffer[offset] + " > " + ceilling);
+      int j = offset;
+      
+      for (int i=j+1; i<limit; i++) {
+        if (buffer[i] > ceilling) {
+          LOG.debug("found " + buffer[i] + " > " + ceilling);
+          varint_buf[v++] = buffer[i];
+          buffer[j] = i-j;
+          j=i;
+        }
+      }
+      buffer[j]=0;
+      Preconditions.checkState(v==varint_buf.length, "patch input not matching calculcated length");
     }
     
+    switch(decision) {
+    case 0:
+      writeScheme4(); break;
+    case 1:
+      writeScheme6(); break;
+    case 2:
+      writeScheme8(); break;
+    case 3:
+      writeScheme12(); break;
+    case 4:
+      writeScheme16(); break;
+    case 5:
+      writeScheme24(); break;
+    case 6:
+      writeScheme32(); break;
+    case 7:
+      writeScheme48(); break;
+    default:
+      writeScheme64();
+    }
+    
+    // TODO: varint seems expansive. May need to consider other options like simple8b
+    for (long l: varint_buf)
+      writeVarInt64(l);
+       
     // Make it 16bit aligned
     if (has_tail) {
       super.write(0);
     }
   }
   
-  private void writeScheme4(long input[], int patch_offset, int varints) throws IOException {
-    long [] varint_buf = new long [varints];
-    byte [] buf = new byte [48];
-    assert(input.length==96);
+  private void writeScheme4() throws IOException {
+    final int last_pos_out = this.posOut;
     
-    patchInput(input, patch_offset, varint_buf, (1L<<4) -1);
-    
-    // Now all elements in input is less than 15
-    for (int i=0, j=0; i<input.length; i+=32, j+=16) {
-      for(int k=0; k<16; k++) {
-        buf[j+k] = (byte)(input[i+k] | (input[i+k+16] << 4));
+    // 3 iterations. Each takes 32 ints
+    for (int i=0; i<48; i+=16) {
+      // Inner loop take 16 * 2 ints
+      for(int j=0; j<16; j++) {
+        byteBuf[i+j] = (byte)(buffer[posOut+j] | (buffer[posOut+j+16] << 4));
       }
+      posOut+=32;
     }
-    super.write(buf);
-    for (long l : varint_buf) {
-      writeVarInt64(l);
-    }
+    Preconditions.checkState(posOut-last_pos_out==96, "scheme4 take 96 integers");
+    super.write(byteBuf);
   }
   
-  private void writeScheme6(long input[], int patch_offset, int varints) throws IOException {
-    long [] varint_buf = new long [varints];
-    byte [] buf = new byte [48];
-    patchInput(input, patch_offset, varint_buf, (1L<<6) -1);
+  private void writeScheme6() throws IOException {
+    final int last_pos_out = this.posOut;
     
-    assert(input.length==64);
-    for(int i=0; i<input.length-16; i++) {
-      buf[i] = (byte)input[i];
+    // 48 iterations
+    for(int i=0; i<48; i++) {
+      byteBuf[i] = (byte)buffer[posOut++];
     }
-    for(int i=input.length-16; i<input.length; i++) {
-      byte b = (byte) input[i];
-      buf[i-48] |= (b & 0x03) << 6;
-      buf[i-32] |= (b & 0x0C) << 4;
-      buf[i-16] |= (b & 0x30) << 2;
+    // 16 left
+    for(int i=0; i<16; i++) {
+      byte b = (byte) buffer[posOut++];
+      byteBuf[i]    |= (b & 0x03) << 6;
+      byteBuf[i+16] |= (b & 0x0C) << 4;
+      byteBuf[i+32] |= (b & 0x30) << 2;
     }
-    super.write(buf);
-    for (long l : varint_buf) {
-      writeVarInt64(l);
-    }
+    Preconditions.checkState(posOut-last_pos_out==64, "scheme6 takes 64 integers");
+    super.write(byteBuf);
   }
   
-  private void writeScheme8(long input[], int patch_offset, int varints) throws IOException {
-    long [] varint_buf = new long [varints];
-    byte [] buf = new byte [48];
-    patchInput(input, patch_offset, varint_buf, (1L<<8) -1);
-    assert(input.length==48);
-    for(int i=0; i<input.length; i++) {
-      buf[i] = (byte) input[i];
+  private void writeScheme8() throws IOException {
+    final int last_pos_out = this.posOut;
+
+    // 48 iterations
+    for(int i=0; i<48; i++) {
+      byteBuf[i] = (byte) buffer[posOut++];
     }
-    super.write(buf);
-    for(long l: varint_buf)
-      writeVarInt64(l);
+
+    Preconditions.checkState(posOut-last_pos_out==48, "scheme8 takes 48 integers");
+    super.write(byteBuf);
   }
   
-  private void writeScheme12(long input[], int patch_offset, int varints) throws IOException {
-    long [] varint_buf = new long [varints];
-    byte [] buf = new byte [48];
-    patchInput(input, patch_offset, varint_buf, (1L<<12) -1);
-    assert(input.length==32);
-    for(int i=0,j=0; i<input.length-8; i++, j+=2) {
-      buf[j]   = (byte)(input[i] & 0xFF);
-      buf[j+1] = (byte)((input[i] & 0x0F00)>>>8);
+  private void writeScheme12() throws IOException {
+    final int last_pos_out = this.posOut;
+
+    // 24 iterations
+    for(int i=0; i<48; i+=2) {
+      long l = buffer[posOut++];
+      byteBuf[i]   = (byte)(l & 0xFF); l>>>=8;
+      byteBuf[i+1] = (byte)(l & 0x0F);
     }
-    for(int i=input.length-8, j=1; i<input.length; i++, j+=2) {
-      long l = input[i];
-      buf[j]    |= (byte) ((l & 0x0F) << 4); l>>=4;
-      buf[j+8]  |= (byte) ((l & 0x0F) << 4); l>>=4;
-      buf[j+16] |= (byte) ((l & 0x0F) << 4); 
+    // 8 left. Fill the high byte in the half word
+    for(int i=1; i<16; i+=2) {
+      long l = buffer[posOut++];
+      byteBuf[i]    |= (byte) ((l & 0x0F) << 4); l>>>=4;
+      byteBuf[i+16] |= (byte) ((l & 0x0F) << 4); l>>>=4;
+      byteBuf[i+32] |= (byte) ((l & 0x0F) << 4);
     }
-    super.write(buf);
-    for(long l: varint_buf)
-      writeVarInt64(l);
+    Preconditions.checkState(posOut-last_pos_out==32, "scheme12 takes 32 integers");
+    super.write(byteBuf);
   }
   
-  private void writeScheme16(long input[], int patch_offset, int varints) throws IOException {
-    long [] varint_buf = new long [varints];
-    byte [] buf = new byte [48];
-    patchInput(input, patch_offset, varint_buf, (1L<<16) -1);
-    assert(input.length==24);
-    for(int i=0,j=0; i<input.length; i++,j+=2) {
-      long l = input[i];
-      buf[j]   = (byte) (l & 0xFF); l >>= 8;
-      buf[j+1] = (byte) (l & 0xFF);
+  private void writeScheme16() throws IOException {
+    final int last_pos_out = this.posOut;
+
+    // 24 iterations
+    for(int i=0; i<48; i+=2) {
+      long l = buffer[posOut++];
+      byteBuf[i]   = (byte) (l & 0xFF); l>>>=8;
+      byteBuf[i+1] = (byte) (l & 0xFF);
     }
-    super.write(buf);
-    for(long l: varint_buf)
-      writeVarInt64(l);
+    Preconditions.checkState(posOut-last_pos_out==24, "scheme16 takes 24 integers");
+    super.write(byteBuf);
   }
   
-  private void writeScheme24(long input[], int patch_offset, int varints) throws IOException {
-    long [] varint_buf = new long [varints];
-    byte [] buf = new byte [48];
-    patchInput(input, patch_offset, varint_buf, (1L<<24) -1);
-    assert(input.length==16);
+  private void writeScheme24() throws IOException {
+    final int last_pos_out = this.posOut;
     
-    for(int i=0,j=0; i<input.length-4; i++,j+=4) {
-      long l = input[i];
-      buf[j]   = (byte) (l & 0xFF); l >>= 8;
-      buf[j+1] = (byte) (l & 0xFF); l >>= 8;
-      buf[j+2] = (byte) (l & 0xFF);
+    // 12 iterations
+    for(int i=0; i<48; i+=4) {
+      long l = buffer[posOut++];
+      byteBuf[i]   = (byte) (l & 0xFF); l>>>=8;
+      byteBuf[i+1] = (byte) (l & 0xFF); l>>>=8;
+      byteBuf[i+2] = (byte) (l & 0xFF);
     }
-    for(int i=input.length-4, j=3; i<input.length; i++, j+=4) {
-      long l = input[i];
-      buf[j]    = (byte) (l & 0xFF); l>>=8;
-    // TODO may be wrong
-      buf[j+16] = (byte) (l & 0xFF); l>>=8;
-      buf[j+32] = (byte) (l & 0xFF);; 
+    // 4 left. Fill the most significant byte in the word
+    for(int i=3; i<16; i+=4) {
+      long l = buffer[posOut++];
+      byteBuf[i]    = (byte) (l & 0xFF); l>>>=8;
+      byteBuf[i+16] = (byte) (l & 0xFF); l>>>=8;
+      byteBuf[i+32] = (byte) (l & 0xFF);; 
     }
-    super.write(buf);
-    for(long l: varint_buf)
-      writeVarInt64(l);
+    Preconditions.checkState(posOut-last_pos_out==16, "scheme24 takes 16 integers");
+    super.write(byteBuf);
   }
   
-  private void writeScheme32(long input[], int patch_offset, int varints) throws IOException {
-    long [] varint_buf = new long [varints];
-    byte [] buf = new byte [48];
-    patchInput(input, patch_offset, varint_buf, (1L<<32) -1);
-    assert(input.length==12);
-    for(int i=0,j=0; i<input.length-4; i++,j+=4) {
-      long l = input[i];
-      buf[j]   = (byte) (l & 0xFF); l >>= 8;
-      buf[j+1] = (byte) (l & 0xFF); l >>= 8;
-      buf[j+2] = (byte) (l & 0xFF); l >>= 8;
-      buf[j+3] = (byte) (l & 0xFF);
+  private void writeScheme32() throws IOException {
+    final int last_pos_out = this.posOut;
+
+    // 12 iterations
+    for(int i=0; i<48; i+=4) {
+      long l = buffer[posOut++];
+      byteBuf[i]   = (byte) (l & 0xFF); l>>>=8;
+      byteBuf[i+1] = (byte) (l & 0xFF); l>>>=8;
+      byteBuf[i+2] = (byte) (l & 0xFF); l>>>=8;
+      byteBuf[i+3] = (byte) (l & 0xFF);
     }
-    super.write(buf);
-    for(long l: varint_buf)
-      writeVarInt64(l);
+    Preconditions.checkState(posOut-last_pos_out==12, "scheme32 takes 12 integers");
+    super.write(byteBuf);
   }
   
-  private void writeScheme48(long input[], int patch_offset, int varints) throws IOException {
-    long [] varint_buf = new long [varints];
-    byte [] buf = new byte [48];
-    patchInput(input, patch_offset, varint_buf, (1L<<48) -1);
-    assert(input.length==8);
-    
-    for(int i=0,j=0; i<input.length-2; i++,j+=8) {
-      long l = input[i];
-      buf[j]   = (byte) (l & 0xFF); l >>= 8;
-      buf[j+1] = (byte) (l & 0xFF); l >>= 8;
-      buf[j+2] = (byte) (l & 0xFF); l >>= 8;
-      buf[j+3] = (byte) (l & 0xFF); l >>= 8;     
-      buf[j+4] = (byte) (l & 0xFF); l >>= 8;
-      buf[j+5] = (byte) (l & 0xFF);
+  private void writeScheme48() throws IOException {
+    final int last_pos_out = this.posOut;
+
+    // 6 iterations
+    for(int i=0; i<48; i+=8) {
+      long l = buffer[posOut++];
+      byteBuf[i]   = (byte) (l & 0xFF); l>>>=8;
+      byteBuf[i+1] = (byte) (l & 0xFF); l>>>=8;
+      byteBuf[i+2] = (byte) (l & 0xFF); l>>>=8;
+      byteBuf[i+3] = (byte) (l & 0xFF); l>>>=8;     
+      byteBuf[i+4] = (byte) (l & 0xFF); l>>>=8;
+      byteBuf[i+5] = (byte) (l & 0xFF);
     }
-    for(int i=input.length-2, j=6; i<input.length; i++, j+=24) {
-      long l = input[i]; 
-      buf[j]    = (byte) (l & 0xFF); l >>= 8;
-      buf[j+1]  = (byte) (l & 0xFF); l >>= 8;
-      buf[j+8] =  (byte) (l & 0xFF); l >>= 8;
-      buf[j+9] =  (byte) (l & 0xFF); l >>= 8;     
-      buf[j+16] = (byte) (l & 0xFF); l >>= 8;
-      buf[j+17] = (byte) (l & 0xFF);
+    // 2 left. Fill the 2 most significant bytes in double word
+    for(int i=6; i<48; i+=24) {
+      long l = buffer[posOut++]; 
+      byteBuf[i]    = (byte) (l & 0xFF); l >>= 8;
+      byteBuf[i+1]  = (byte) (l & 0xFF); l >>= 8;
+      byteBuf[i+8] =  (byte) (l & 0xFF); l >>= 8;
+      byteBuf[i+9] =  (byte) (l & 0xFF); l >>= 8;     
+      byteBuf[i+16] = (byte) (l & 0xFF); l >>= 8;
+      byteBuf[i+17] = (byte) (l & 0xFF);
     }
-    super.write(buf);
-    for(long l: varint_buf)
-      writeVarInt64(l);
+    Preconditions.checkState(posOut-last_pos_out==8, "scheme48 takes 8 integers");
+    super.write(byteBuf);
   }
   
-  private void writeScheme64(long input[], int patch_offset, int varints) throws IOException {
-    byte [] buf = new byte [48];
-    assert(input.length==6);
-    for(int i=0,j=0; i<input.length; i++,j+=8) {
-      long l = input[i];
-      buf[j]   = (byte) (l & 0xFF); l >>= 8;
-      buf[j+1] = (byte) (l & 0xFF); l >>= 8;
-      buf[j+2] = (byte) (l & 0xFF); l >>= 8;
-      buf[j+3] = (byte) (l & 0xFF); l >>= 8;     
-      buf[j+4] = (byte) (l & 0xFF); l >>= 8;
-      buf[j+5] = (byte) (l & 0xFF); l >>= 8;
-      buf[j+6] = (byte) (l & 0xFF); l >>= 8;
-      buf[j+7] = (byte) (l & 0xFF);
+  private void writeScheme64() throws IOException {
+    final int last_pos_out = this.posOut;
+    // 6 iterations
+    for(int i=0; i<48; i+=8) {
+      long l = buffer[posOut++];
+      byteBuf[i]   = (byte) (l & 0xFF); l >>= 8;
+      byteBuf[i+1] = (byte) (l & 0xFF); l >>= 8;
+      byteBuf[i+2] = (byte) (l & 0xFF); l >>= 8;
+      byteBuf[i+3] = (byte) (l & 0xFF); l >>= 8;     
+      byteBuf[i+4] = (byte) (l & 0xFF); l >>= 8;
+      byteBuf[i+5] = (byte) (l & 0xFF); l >>= 8;
+      byteBuf[i+6] = (byte) (l & 0xFF); l >>= 8;
+      byteBuf[i+7] = (byte) (l & 0xFF);
     }
-    super.write(buf);
+    Preconditions.checkState(posOut-last_pos_out==6, "scheme64 takes 6 integers");
+    super.write(byteBuf);
   }
-  
-  private void patchInput(long input[], int patch_offset, long[] varint_buf, long ceilling) {
-    int v=0;
-    if (varint_buf.length==0) return;
-    
-    // first patch
-    varint_buf[v++] = input[patch_offset];
-    int j = patch_offset;
-    
-    for (int i=j+1; i<input.length; i++) {
-      if (input[i] > ceilling) {
-        LOG.debug("found " + input[i] + " > " + ceilling);
-        varint_buf[v++] = input[i];
-        input[j] = i-j;
-        j=i;
-      }
-    }
-    assert(v==varint_buf.length);
-    input[j]=0;
-  }
-  
   
   private void writeVarInt64(long i) throws IOException {
     long masked;
@@ -480,33 +476,8 @@ public class Pfor384OutputStream extends FilterOutputStream{
     //System.out.println("------");
   }
   
-  public static void calculateBits(long [] input) {
-    int [] panelties = new int [9];
-    int [] varints = new int[9];
-    
-    for (int i = 0; i<9; i++) {
-      final int scheme = schemes[i];
-      final int end = 384/scheme;
-      final long scheme_limit = scheme==64? Long.MAX_VALUE : (1L<<scheme) -1;
-      panelties[i] = 0;
-      varints[i] = 0;
-      for (int j=0; j<end; j++) {
-        if (input[j] > scheme_limit) {
-          System.out.println(input[j] + ">" + scheme_limit);
-          panelties[i] += varIntPenalty(input[j]);
-          varints[i]++;
-        }
-      }
-    }
-    for (int i=0; i<9; i++) {
-      final double ints = 384/schemes[i];
-      final double rate = (16.0+384.0+panelties[i])/ints;
-      System.out.printf("scheme %02d: rate: %5.5f, varints: %03d\n", schemes[i], rate, varints[i]);
-    }
-    
-  }
   
-  public static int varIntPenalty(long input) {
+  private static int varIntPenalty(long input) {
     long masked;
     for (int i=0; i< 10; i++) {
       int shift = mask_shift_64[i];

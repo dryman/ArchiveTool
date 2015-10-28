@@ -76,7 +76,7 @@ public class Prototype {
     // zipped long (deflate)     694,570      11.10 bits/integer wow it's may be very hard to beat..
     // Test run for Pfor384:                  23.33 bits/integer Didn't work that well, huh
     // Pfor384:                1,106,145      17.68 bits/integer Better than above ;)
-    // Pfor384 + defalte         686,297      10.97 bits/integer I guess this is the best that I can do
+    // Pfor384 + defalte         706,445      11.29 bits/integer I guess this is the best that I can do
     // varint                  4,799,505      76.73 bits/integer At least we're better than varint, aren't we?
     InputStream is = Prototype.class.getResourceAsStream("integers");
     BufferedReader br = new BufferedReader(new InputStreamReader(is));
@@ -86,7 +86,7 @@ public class Prototype {
     DataOutputStream dos = new DataOutputStream(bos1);
     //VarIntOutputStream vios1 = new VarIntOutputStream(new BufferedOutputStream(dos));
     DataOutputStream dos2 = new DataOutputStream(new DeflaterOutputStream(dos));
-    Pfor384OutputStream pos = new Pfor384OutputStream(dos2);
+    Pfor384OutputStream pos = new Pfor384OutputStream(dos);
     
 
     
