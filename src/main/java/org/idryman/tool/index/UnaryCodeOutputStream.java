@@ -68,16 +68,17 @@ public class UnaryCodeOutputStream extends FilterOutputStream{
     
     ByteArrayInputStream bis = new ByteArrayInputStream(bos.toByteArray());
     UnaryCodeInputStream uis = new UnaryCodeInputStream(bis);
-    uis.readInts(output, 0, output.length);
+    //uis.readInts(output, 0, output.length);
 //    for(int i:output) {
 //      System.out.println(i);
 //    }
-    uis.close();
+    //uis.close();
     //System.out.println(Hex.encodeHexString(bos.toByteArray()));
     //System.out.println(bos.toByteArray().toString());
     for (int i=0; i<input.length; i++) {
-      Preconditions.checkState(input[i]==output[i]);
+      Preconditions.checkState(input[i]==uis.readInt());
     }
+    uis.close();
   }
 
 }

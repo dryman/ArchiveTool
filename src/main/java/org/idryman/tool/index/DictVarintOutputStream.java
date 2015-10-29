@@ -1,5 +1,6 @@
 package org.idryman.tool.index;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.FilterOutputStream;
@@ -58,13 +59,12 @@ public class DictVarintOutputStream extends FilterOutputStream{
     for (int shift : mask_shift_64) {
       masked = number & (0x7FL << shift);
       if (seen || masked != 0) {
-        varint_buf_64[pos++] = (byte) ((masked >>>= shift) | 0x80);
+        varint_buf_64[pos++] = (byte) (masked >>>= shift);
         seen = true;
       }
     }
-    byte val = (byte) (number & 0x3F);
+    byte val = (byte) ((number & 0x3F) | 0x80);
     if (is_last) {
-      System.out.println(val);
       val |= (byte)0x40;
     }
     varint_buf_64[pos++] = val;
@@ -75,9 +75,19 @@ public class DictVarintOutputStream extends FilterOutputStream{
     ByteArrayOutputStream bos = new ByteArrayOutputStream();
     DataOutputStream dos = new DataOutputStream(bos);
     DictVarintOutputStream dvos = new DictVarintOutputStream(dos);
-    dvos.writeLongs(new long[]{3,3,3,4,4,1,1,2,3,4,4,1,1,4,4});
+    long [] longs = new long[]{3,3,3,4,4,1,1,2,3,4,4,1,1,4,4};
+    dvos.writeLongs(longs);
     dvos.close();
     System.out.println(Hex.encodeHexString(bos.toByteArray()));
     System.out.println(dos.size());
+    
+    ByteArrayInputStream bis = new ByteArrayInputStream(bos.toByteArray());
+    DictVarintInputStream dvis = new DictVarintInputStream(bis);
+    
+    
+    for (int i=0; i<longs.length; i++) {
+      System.out.println(dvis.readLong());
+    }
+    dvis.close();
   }
 }

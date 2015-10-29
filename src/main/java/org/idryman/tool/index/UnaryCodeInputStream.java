@@ -7,36 +7,35 @@ import java.io.InputStream;
 public class UnaryCodeInputStream extends FilterInputStream{
   private int pz=0, ps=0;
   private byte b;
+  private boolean readByte = true;
   
   protected UnaryCodeInputStream(InputStream in) {
     super(in);
   }
   
-  public synchronized int readInts(int[]out, int offset, int len) throws IOException {
-    int iter = offset, end = offset+len, tmp;
-    while (iter < end) {
-      tmp = read();
-      if (tmp==-1) {
-        return iter == offset ? -1 : iter - offset;
+  public synchronized int readInt() throws IOException {
+
+    while (true) {
+      if (readByte) {
+        int tmp = read();
+        if (tmp == -1) return -1;
+        b = (byte) tmp;
       }
-      b = (byte) tmp;
-      
-      while(true) {
-        if (b==0) {
-          pz+=8-ps;
-          ps = 0;
-          break;
-        }
+      readByte = false;
+   
+      if (b==0) {
+        pz += 8 - ps;
+        ps = 0;
+        readByte=true;
+      } else {
         int cnt = ntz(b);
-        out[iter++] = cnt - ps + pz;
+        int ret = cnt - ps + pz;
         ps = cnt+1;
         pz = 0;
         b = (byte) (b & (b-1));
-        
+        return ret;
       }
     }
-    
-    return 0;
   }
   
   private static int ntz(byte x) {
