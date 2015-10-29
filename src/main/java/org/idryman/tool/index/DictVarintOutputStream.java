@@ -21,20 +21,12 @@ public class DictVarintOutputStream extends FilterOutputStream{
   }
 
 
-  public void writeLongs(long [] numbers) throws IOException {
-    long [] numberBuf = Arrays.copyOf(numbers, numbers.length);
+  public synchronized void writeLongs(long [] numbers) throws IOException {
+    long [] numberBuf = generateDict(numbers);
     int [] indexes = new int [numbers.length];
-    Arrays.sort(numberBuf);
-    int i, j;
-    for(i=0,j=1; j<numberBuf.length; j++) {
-      if (numberBuf[i] < numberBuf[j]) {
-        numberBuf[++i] = numberBuf[j];
-      }
-    }
-    numberBuf = Arrays.copyOf(numberBuf, i+1);
     System.out.println(Arrays.toString(numberBuf));
 
-    for(i=0; i<numbers.length; i++) {
+    for(int i=0; i<numbers.length; i++) {
       indexes[i] = Arrays.binarySearch(numberBuf, numbers[i]);
     }
     
@@ -43,13 +35,25 @@ public class DictVarintOutputStream extends FilterOutputStream{
     // When it is end of a int, it has MSB 00; when it is the end of whole varint
     // the MSB is 01
     writeVarint(numberBuf[0], false);
-    for(i=1; i<numberBuf.length-1; i++)
+    for(int i=1; i<numberBuf.length-1; i++)
       writeVarint(numberBuf[i]-numberBuf[i-1], false);
     if (numberBuf.length>1)
       writeVarint(numberBuf[numberBuf.length-1]-numberBuf[numberBuf.length-2], true);
     
     unaryOutput.writeInts(indexes);
 
+  }
+  
+  private long [] generateDict(long [] numbers) {
+    long [] numberBuf = Arrays.copyOf(numbers, numbers.length);
+    Arrays.sort(numberBuf);
+    int i, j;
+    for(i=0,j=1; j<numberBuf.length; j++) {
+      if (numberBuf[i] < numberBuf[j]) {
+        numberBuf[++i] = numberBuf[j];
+      }
+    }
+    return Arrays.copyOf(numberBuf, i+1);
   }
   
   private void writeVarint(long number, boolean is_last) throws IOException {
