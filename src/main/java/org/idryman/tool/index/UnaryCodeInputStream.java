@@ -14,7 +14,6 @@ public class UnaryCodeInputStream extends FilterInputStream{
   }
   
   public synchronized int readInt() throws IOException {
-
     while (true) {
       if (readByte) {
         int tmp = read();
@@ -44,9 +43,5 @@ public class UnaryCodeInputStream extends FilterInputStream{
     if ((x&0x0f)==0) { n+=4; x>>>=4;}
     if ((x&0x03)==0) { n+=2; x>>>=2;}
     return n-(x&1);
-  }
-  
-  public static void main(String[] args) throws IOException {
-    System.out.println(ntz((byte)0x20));
   }
 }
