@@ -1,46 +1,20 @@
 package org.idryman.tool.index;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.DataOutputStream;
 import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.util.Random;
 
-import org.apache.commons.codec.binary.Hex;
-
-import com.google.common.base.Preconditions;
-
-public class UnaryCodeOutputStream extends FilterOutputStream{
-  private static Random random = new Random(1);
+public class UnaryCodeOutputStream extends FilterOutputStream implements IntOutputStream{
+  private int ps;
+  private byte b;
+  private boolean dirtyByte = false, closed = false;
   
   public UnaryCodeOutputStream(OutputStream out) {
     super(out);
   }
   
-  public void writeInts(int [] numbers) throws IOException {
-    int ps=0, idx=0;
-    byte buf [] = new byte [getBytesForInts(numbers)];    
-    for (int n: numbers) {
-      if (ps==8){
-        idx++;
-        ps=0;
-      }
-      n+=ps;
-      ps=0;
-      while(n >= 8) {
-        idx++;
-        n-=8;
-      }
-      //System.out.println(n);
-      buf[idx] |= (byte)(1 << n);
-      ps = n+1;
-    }
-    super.write(buf);
-    Preconditions.checkState(idx==buf.length-1);
-  }
-  public int getBytesForInts(int [] numbers) {
+  @Override
+  public int estimateBytes(int[] numbers) {
     int sum = 0, ret;
     for (int n : numbers) {
       sum += n+1;
@@ -48,37 +22,58 @@ public class UnaryCodeOutputStream extends FilterOutputStream{
     ret = sum >>> 3;
     return sum - (ret << 3) == 0 ? ret : ret+1;
   }
-
-  public static void main(String[] args) throws IOException {
-    int [] input  = new int [10000];
-    int [] output = new int [input.length];
-    for (int i=0; i<input.length; i++) {      
-      input[i] = random.nextInt(32) & Integer.MAX_VALUE;
-      //System.out.println(input[i]);
+  
+  @Override
+  public synchronized void writeInt(int number) throws IOException {
+    if (!closed) {
+      number+=ps;
+      ps=0;
+      while(number >= 8) {
+        super.write(b);
+        b=0;
+        number-=8;
+      }
+      b |= (byte) (1 << number);
+      ps = number + 1;
+      
+      if (ps==8) {
+        super.write(b);
+        b=0;
+        ps=0;
+        dirtyByte = false;
+      } else {
+        dirtyByte = true;
+      }
     }
-    
-    ByteArrayOutputStream bos = new ByteArrayOutputStream();
-    DataOutputStream dos = new DataOutputStream(bos);
-    UnaryCodeOutputStream uos = new UnaryCodeOutputStream(dos);
-    uos.writeInts(input);
-    uos.close();
-    System.out.println("-----------");
-    System.out.println(dos.size());
-    System.out.println("-----------");
-    
-    ByteArrayInputStream bis = new ByteArrayInputStream(bos.toByteArray());
-    UnaryCodeInputStream uis = new UnaryCodeInputStream(bis);
-    //uis.readInts(output, 0, output.length);
-//    for(int i:output) {
-//      System.out.println(i);
-//    }
-    //uis.close();
-    //System.out.println(Hex.encodeHexString(bos.toByteArray()));
-    //System.out.println(bos.toByteArray().toString());
-    for (int i=0; i<input.length; i++) {
-      Preconditions.checkState(input[i]==uis.readInt());
-    }
-    uis.close();
   }
+  
+  @Override
+  public synchronized void close() throws IOException {
+    if (!closed) {
+      if (dirtyByte) super.write(b);
+      closed=true;
+    }
+    // do not close super.
+  }
+  
+  @Override
+  public synchronized void flush() throws IOException {
+    this.close();
+  }
+  
+  @Override
+  public void write(int b) throws IOException {
+    throw new UnsupportedOperationException();
+  }
+  @Override
+  public void write(byte b[]) throws IOException {
+    throw new UnsupportedOperationException();
+  }
+  @Override
+  public void write(byte b[], int off, int len) throws IOException {
+    throw new UnsupportedOperationException();
+  }
+
+
 
 }
