@@ -91,6 +91,18 @@ public class DictVarintOutputStream extends FilterOutputStream implements LongOu
     return buf;
   }
   
+  private long [] generateDict(long [] numbers) {
+    long [] numberBuf = Arrays.copyOf(numbers, numbers.length);
+    Arrays.sort(numberBuf);
+    int i, j;
+    for(i=0,j=1; j<numberBuf.length; j++) {
+      if (numberBuf[i] < numberBuf[j]) {
+        numberBuf[++i] = numberBuf[j];
+      }
+    }
+    return Arrays.copyOf(numberBuf, i+1);
+  }
+  
   private void writeVarint(long number, boolean is_last) throws IOException {
     long masked;
     int pos=0;
