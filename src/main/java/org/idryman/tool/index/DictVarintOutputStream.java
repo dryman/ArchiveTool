@@ -74,9 +74,12 @@ public class DictVarintOutputStream extends FilterOutputStream implements LongOu
       dict[i] -= prev;
       prev = tmp;
     }
-    return 0;
+    int dict_size = estimateVarintBytes(dict);
+    int idx_size  = unaryOutput.estimateBytes(indexes);
+    return dict_size + idx_size;
   }
   
+  @VisibleForTesting
   private long [] createDict(long[] numbers) {
     long [] buf = numbers;
     Arrays.sort(buf);
@@ -89,18 +92,6 @@ public class DictVarintOutputStream extends FilterOutputStream implements LongOu
     }
     buf = Arrays.copyOf(buf, i+1);
     return buf;
-  }
-  
-  private long [] generateDict(long [] numbers) {
-    long [] numberBuf = Arrays.copyOf(numbers, numbers.length);
-    Arrays.sort(numberBuf);
-    int i, j;
-    for(i=0,j=1; j<numberBuf.length; j++) {
-      if (numberBuf[i] < numberBuf[j]) {
-        numberBuf[++i] = numberBuf[j];
-      }
-    }
-    return Arrays.copyOf(numberBuf, i+1);
   }
   
   private void writeVarint(long number, boolean is_last) throws IOException {
@@ -122,20 +113,19 @@ public class DictVarintOutputStream extends FilterOutputStream implements LongOu
     super.write(varint_buf_64, 0, pos);
   }
   
+  @VisibleForTesting
   private int estimateVarintBytes(long [] numbers) {
-    int acc = 0;
+    int sum = 0;
     for(long n : numbers) {
-      //if ()
-      // TODO calculate the leading zeros => which scheme
       int s = 64 - Long.numberOfLeadingZeros(n);
-      for(int i=0; i<mask_shift_64.length-1; i++) {
-        if (s <= mask_shift_64[i] && s > mask_shift_64[i+1]) {
-          acc += 10-i;
+      for (int i=0; i<10; i++) {
+        if (s <= (6+i*7)) {
+          sum+=(1+i);
+          break;
         }
       }
-      
     }
-    return acc;
+    return sum;
   }
   
   @Override
