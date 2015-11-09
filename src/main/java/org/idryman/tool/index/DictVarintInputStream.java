@@ -4,7 +4,6 @@ import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 import org.apache.commons.lang.ArrayUtils;
@@ -38,7 +37,6 @@ public class DictVarintInputStream extends FilterInputStream{
         list.add(acc);
       } while ((tmp & 0x40) == 0);
       dict = ArrayUtils.toPrimitive(list.toArray(new Long[0]));
-      System.out.println(Arrays.toString(dict));
     }
     final int idx = uis.readInt();
     if (idx == -1) return -1;

@@ -7,7 +7,8 @@ import java.io.OutputStream;
 public class UnaryCodeOutputStream extends FilterOutputStream implements IntOutputStream{
   private int ps;
   private byte b;
-  private boolean dirtyByte = false, closed = false;
+  private boolean dirtyByte;
+  private boolean closed;
   
   public UnaryCodeOutputStream(OutputStream out) {
     super(out);

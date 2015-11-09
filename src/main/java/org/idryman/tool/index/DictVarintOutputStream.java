@@ -54,14 +54,16 @@ public class DictVarintOutputStream extends FilterOutputStream implements LongOu
     }
     
     writeVarint(dict[dict.length-1], true);
-    
+    /*
+     * It might be better if we use base2/base4 golomb-rice coding here
+     * The penalty on long sequence of integers is quite high when we use plain unary coding.
+     */
     for (int idx : indexes) {
       unaryOutput.writeInt(idx);
     }
     unaryOutput.close();
     super.flush();
     buffer = null;
-    unaryOutput = null;
   }
   
 
@@ -69,6 +71,11 @@ public class DictVarintOutputStream extends FilterOutputStream implements LongOu
   public int estimateBytes(long[] numbers) {
     long [] dict = createDict(Arrays.copyOf(numbers, numbers.length));
     int [] indexes = new int [numbers.length];
+    
+    for(int i=0; i<numbers.length; i++) {
+      indexes[i] = Arrays.binarySearch(dict, numbers[i]);
+    }
+    
     long prev = dict[0];
     for(int i=1; i<dict.length; i++) {
       long tmp = dict[i];
@@ -82,7 +89,7 @@ public class DictVarintOutputStream extends FilterOutputStream implements LongOu
   
   @VisibleForTesting
   long [] createDict(long[] numbers) {
-    long [] buf = numbers;
+    long [] buf = Arrays.copyOf(numbers, numbers.length);
     Arrays.sort(buf);
     // Get distinct elements only
     int i, j;

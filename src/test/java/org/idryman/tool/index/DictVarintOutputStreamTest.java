@@ -1,13 +1,13 @@
 package org.idryman.tool.index;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
 
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 
-import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.junit.Before;
 import org.junit.Test;
@@ -24,16 +24,16 @@ public class DictVarintOutputStreamTest {
   private ByteArrayOutputStream bos;
   private DataOutputStream dos;
   private DictVarintOutputStream dvos;
-  // Test predicted size
-  // test several expected output
   
   @Parameters
   public static Collection<Object[]> testCases() {
     return Arrays.asList(new Object[][] {
         // 00001111 11100000
-        //{new long[]{32,32,32,32}, 2, new long[] {32}, new byte[]{(byte)0xE0, 0x0F}},
+        {new long[]{32,32,32,32}, 2, new long[] {32}, new byte[]{(byte)0xE0, 0x0F}},
         // 00110110 11100000 10000001
-        {new long[]{33,1,33,1}, 3, new long[] {1, 33}, new byte[]{(byte)0x81,(byte)0xE0, 0x36}}
+        {new long[]{33,1,33,1}, 3, new long[] {1, 33}, new byte[]{(byte)0x81,(byte)0xE0, 0x36}},
+        // 00000011 11000000 00000000x8 00000010
+        {new long[]{0x8000_0000_0000_0000L, 0x8000_0000_0000_0000L}, 11, new long [] {0x8000_0000_0000_0000L} , new byte[]{0x02, 0,0,0,0,0,0,0,0, (byte)0xc0, 0x03}} 
     });
   }
   
@@ -73,8 +73,6 @@ public class DictVarintOutputStreamTest {
     for(long i:input) dvos.writeLong(i);
     dvos.close();
     dos.close();
-    System.out.println(Hex.encodeHexString(bos.toByteArray()));
     assertArrayEquals(output, bos.toByteArray());
   }
-
 }
