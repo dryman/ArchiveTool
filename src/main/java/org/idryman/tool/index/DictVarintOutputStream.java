@@ -8,8 +8,8 @@ import java.util.Arrays;
 import com.google.common.annotations.VisibleForTesting;
 
 public class DictVarintOutputStream extends FilterOutputStream implements LongOutputStream{
-  private final static int [] mask_shift_64 = {69,62,56,48,41,34,27,20,13,6};
-  private byte varint_buf_64[] = new byte[11];
+  private final static int [] mask_shift_64 = {55,48,41,34,27,20,13,6};
+  private byte varint_buf_64[] = new byte[10];
   private UnaryCodeOutputStream unaryOutput;
   private long buffer[];
   private int count;
@@ -59,6 +59,7 @@ public class DictVarintOutputStream extends FilterOutputStream implements LongOu
       unaryOutput.writeInt(idx);
     }
     unaryOutput.close();
+    super.flush();
     buffer = null;
     unaryOutput = null;
   }
@@ -80,7 +81,7 @@ public class DictVarintOutputStream extends FilterOutputStream implements LongOu
   }
   
   @VisibleForTesting
-  private long [] createDict(long[] numbers) {
+  long [] createDict(long[] numbers) {
     long [] buf = numbers;
     Arrays.sort(buf);
     // Get distinct elements only
@@ -98,8 +99,14 @@ public class DictVarintOutputStream extends FilterOutputStream implements LongOu
     long masked;
     int pos=0;
     boolean seen = false;
+    masked = number & 0xC0_00_00_00_00_00_00_00L;
+    if (masked!=0) {
+      varint_buf_64[pos++] = (byte) (masked >>>= 62);
+      seen = true;
+    }
     for (int shift : mask_shift_64) {
-      masked = number & (0x7FL << shift);
+      final long mask = 0x7FL << shift;
+      masked = number & mask;
       if (seen || masked != 0) {
         varint_buf_64[pos++] = (byte) (masked >>>= shift);
         seen = true;

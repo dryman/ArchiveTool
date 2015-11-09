@@ -7,7 +7,6 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.List;
 
 import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.junit.Before;
@@ -27,17 +26,22 @@ public class UnaryCodeOutputStreamTest {
 
   @Parameters
   public static Collection<Object[]> testCases() {
-    List<Object[]> asList = Arrays.asList(new Object[][] {
-        // zero case
+    return Arrays.asList(new Object[][] {
+        // zero case    
+        // 0000 0001
         {new int[]{0}, 1, new byte[]{0x1}},
         // normal input
+        // 0000 0001 0001 0010
         {new int[]{1,2,3}, 2, new byte[]{0x12, 0x1}},
-        // byte that match the edge
+        // bit that matches the edge
+        // 1000 0100 0000 0001 0000 0000
         {new int[]{8,9,4}, 3, new byte[]{0x0, 0x1, (byte) 0x84}},
-        // byte exceed the edge
-        {new int[]{8}, 2, new byte[]{0x0,0x1}}
+        // bit exceeds the edge
+        // 0000 0001 0000 0000
+        {new int[]{8}, 2, new byte[]{0x0,0x1}},
+        // 0011 0110
+        {new int[]{1,0,1,0}, 1, new byte[]{ 0x36 }}
     });
-    return asList;
   }
   
   public UnaryCodeOutputStreamTest(int [] input, int length, byte[] output) {
