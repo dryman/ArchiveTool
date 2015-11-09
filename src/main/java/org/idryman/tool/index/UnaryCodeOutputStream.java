@@ -75,6 +75,4 @@ public class UnaryCodeOutputStream extends FilterOutputStream implements IntOutp
     throw new UnsupportedOperationException();
   }
 
-
-
 }
