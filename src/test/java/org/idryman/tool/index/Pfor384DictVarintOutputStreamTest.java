@@ -31,17 +31,12 @@ public class Pfor384DictVarintOutputStreamTest {
     
     ArrayList<Long> lst = new ArrayList<>();
     
-    for(int i=0; i<96; i++) {
-      line=br.readLine();
-      lst.add(Long.parseLong(line));
+    while((line=br.readLine())!=null) {
+      pdvos.writeLong(Long.parseLong(line));
       //pdvos.writeLong(Long.parseLong(line));
     }
-    System.out.println(lst);
-    for(Long l : lst) {
-      pdvos.writeLong(l);
-    }
+    pdvos.close();
     
-    int decision = pdvos.makeDecision();
     
     
     //pdvos.

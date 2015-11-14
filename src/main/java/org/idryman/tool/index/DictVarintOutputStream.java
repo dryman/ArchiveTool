@@ -38,32 +38,7 @@ public class DictVarintOutputStream extends FilterOutputStream implements LongOu
   
   @Override
   public synchronized void close() throws IOException {
-    long [] dict = createDict(Arrays.copyOf(buffer, count));
-    int [] indexes = new int [count];
-
-    for(int i=0; i<count; i++) {
-      indexes[i] = Arrays.binarySearch(dict, buffer[i]);
-    }
-    
-    long prev = dict[0];
-    for(int i=1; i<dict.length; i++) {
-      writeVarint(dict[i-1], false);
-      long tmp = dict[i];
-      dict[i] -= prev;
-      prev = tmp;
-    }
-    
-    writeVarint(dict[dict.length-1], true);
-    /*
-     * It might be better if we use base2/base4 golomb-rice coding here
-     * The penalty on long sequence of integers is quite high when we use plain unary coding.
-     */
-    for (int idx : indexes) {
-      unaryOutput.writeInt(idx);
-    }
-    unaryOutput.close();
-    super.flush();
-    buffer = null;
+    flush();
   }
   
 
@@ -144,6 +119,31 @@ public class DictVarintOutputStream extends FilterOutputStream implements LongOu
   
   @Override
   public synchronized void flush() throws IOException {
-    this.close();
+    long [] dict = createDict(Arrays.copyOf(buffer, count));
+    int [] indexes = new int [count];
+
+    for(int i=0; i<count; i++) {
+      indexes[i] = Arrays.binarySearch(dict, buffer[i]);
+    }
+    
+    long prev = dict[0];
+    for(int i=1; i<dict.length; i++) {
+      writeVarint(dict[i-1], false);
+      long tmp = dict[i];
+      dict[i] -= prev;
+      prev = tmp;
+    }
+    
+    writeVarint(dict[dict.length-1], true);
+    /*
+     * It might be better if we use base2/base4 golomb-rice coding here
+     * The penalty on long sequence of integers is quite high when we use plain unary coding.
+     */
+    for (int idx : indexes) {
+      unaryOutput.writeInt(idx);
+    }
+    unaryOutput.close();
+    count=0;
+    super.flush();
   }
 }
