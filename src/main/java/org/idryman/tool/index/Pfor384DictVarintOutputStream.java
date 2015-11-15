@@ -44,6 +44,7 @@ public class Pfor384DictVarintOutputStream extends FilterOutputStream implements
   
   private void flushGroupInts() throws IOException {
     makeDecision();
+    Preconditions.checkState(decision!=-1, "In flush group int it should not use DictVarInt");
     writeWithScheme();
   }
   
@@ -53,6 +54,7 @@ public class Pfor384DictVarintOutputStream extends FilterOutputStream implements
       if (decision != -1) {
         writeWithScheme();
       } else {
+        // FIXME write dictvarint using different header
         break;
       }
     }
@@ -213,7 +215,7 @@ public class Pfor384DictVarintOutputStream extends FilterOutputStream implements
       }
     }
     
-    LOG.info("using scheme: "+schemes[decision] + " with rate: " + (int)lowest_rate + " penalty "+ penalties[decision] + 
+    LOG.info("using scheme: "+schemes[decision] + " with rate: " + (int)lowest_rate + " extra bytes "+ penalties[decision] + 
         " patch_offset " + patch_offset[decision] + " and varints " + exception_len[decision]);
     this.penalty     = penalties[decision];
     this.patchOffset = patch_offset[decision];
@@ -246,6 +248,7 @@ public class Pfor384DictVarintOutputStream extends FilterOutputStream implements
     super.write(header);
     
     // patch input
+    // I think we don't need to calculate this again... 
     final long [] exception_buf = new long [exceptions];
     if (exceptions>0) {
       final int scheme = schemes[decision];
